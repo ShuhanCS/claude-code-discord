@@ -231,7 +231,67 @@ export async function createClaudeCodeBot(config: BotConfig) {
 
   // Initialize PermissionRequest handler — shows Allow/Deny buttons for unapproved tools
   permReqState.handler = createPermissionRequestHandler(bot);
-  
+
+  // Start relay poller for terminal permission bridge
+  let stopRelayPoller: (() => void) | null = null;
+  try {
+    const { startRelayPoller: startPoller, postDecision: postRelayDecision } = await import("./relay/bot-integration.ts");
+
+    stopRelayPoller = startPoller(async (perm) => {
+      const channel = bot.getChannel();
+      if (!channel) return;
+
+      const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = await import("npm:discord.js@14.14.1");
+
+      const embed = new EmbedBuilder()
+        .setColor(0xff9900)
+        .setTitle(`Terminal Permission: ${perm.toolName}`)
+        .setDescription(`A terminal Claude Code session needs permission.\n\n**Project:** \`${perm.project}\`\n**Tool:** \`${perm.toolName}\``)
+        .setFooter({ text: `Relay ID: ${perm.id}` })
+        .setTimestamp();
+
+      // deno-lint-ignore no-explicit-any
+      const row = new ActionRowBuilder<any>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`relay-perm:${perm.id}:allow`)
+          .setLabel('Allow')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(`relay-perm:${perm.id}:deny`)
+          .setLabel('Deny')
+          .setStyle(ButtonStyle.Danger),
+      );
+
+      const msg = await channel.send({ embeds: [embed], components: [row] });
+
+      try {
+        const interaction = await msg.awaitMessageComponent({
+          componentType: ComponentType.Button,
+          time: 300_000, // 5 min timeout
+        });
+
+        const parts = interaction.customId.split(':');
+        const decision = parts[2] as 'allow' | 'deny';
+
+        await postRelayDecision(perm.id, decision);
+
+        embed.setColor(decision === 'allow' ? 0x00ff00 : 0xff4444)
+          .setFooter({ text: decision === 'allow' ? 'Allowed from Discord' : 'Denied from Discord' });
+
+        await interaction.update({ embeds: [embed], components: [] });
+      } catch {
+        // Timeout or error — update embed to show expired
+        embed.setColor(0x888888)
+          .setFooter({ text: 'Expired — answered in terminal' });
+        await msg.edit({ embeds: [embed], components: [] }).catch(() => {});
+      }
+    });
+
+    console.log('[relay] Relay poller started — polling for terminal permissions');
+  } catch {
+    console.log('[relay] Relay poller not started (relay module not available)');
+  }
+
   // Check for updates (non-blocking)
   runVersionCheck().then(async ({ updateAvailable, embed }) => {
     if (updateAvailable && embed) {
@@ -289,6 +349,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
     cleanupInterval,
     // deno-lint-ignore no-explicit-any
     bot: bot as any,
+    stopRelayPoller,
   });
   
   return bot;
@@ -567,6 +628,7 @@ function setupSignalHandlers(ctx: {
   cleanupInterval: number;
   // deno-lint-ignore no-explicit-any
   bot: any;
+  stopRelayPoller?: (() => void) | null;
 }) {
   const { managers, allHandlers, getClaudeController, claudeSender, actualCategoryName, repoName, branchName, cleanupInterval, bot } = ctx;
   const { crashHandler, healthMonitor } = managers;
@@ -579,6 +641,7 @@ function setupSignalHandlers(ctx: {
       // Stop all processes
       shellHandlers.killAllProcesses();
       gitHandlers.killAllWorktreeBots();
+      ctx.stopRelayPoller?.();
       
       // Cancel Claude Code session
       const claudeController = getClaudeController();

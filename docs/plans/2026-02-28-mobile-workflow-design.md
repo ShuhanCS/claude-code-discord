@@ -1,7 +1,7 @@
 # Mobile-First Claude Code Workflow via Discord
 
 **Date:** 2026-02-28
-**Status:** Approved
+**Status:** Approved (design revised after technical research)
 **Project:** claude-code-discord
 
 ## Problem
@@ -12,126 +12,131 @@ When Claude Code runs in the terminal and needs user input (AskUserQuestion, per
 
 Full mobile access to Claude Code sessions — whether started from Discord or from the terminal. See exactly what Claude needs, respond with buttons from your phone.
 
+## Technical Constraints (discovered during research)
+
+1. **AskUserQuestion CANNOT be intercepted by hooks.** It's not a matchable tool name in `PreToolUse`. Filed as feature request (issue #12605, closed). The `Notification` event fires with `elicitation_dialog` matcher, but it's read-only — you can see the question but can't answer programmatically.
+
+2. **PermissionRequest CAN be intercepted.** The `PermissionRequest` hook event fires when the permission dialog appears and can return allow/deny decisions via JSON output.
+
+3. **For full AskUserQuestion interactivity from mobile**, the only path is the Discord bot's `/claude` command (which handles it via the SDK's `canUseTool` callback).
+
+4. **Windows hooks** require `CLAUDE_CODE_GIT_BASH_PATH` env var and LF line endings.
+
 ## Design
 
-### Component 1: Discord Bot Enhancements
+### Component 1: Rich Discord Notifications (Terminal Sessions)
 
-#### 1a. Auto-start on Shuputer boot
-- Windows Task Scheduler runs `deno task start` in `C:\Users\Shuha\projects\claude-code-discord` on login
-- Bot stays running 24/7 as long as Shuputer is on
+Enhance the existing `discord-notify.sh` hook to extract and display full context.
 
-#### 1b. Multi-project `/project` command
+#### 1a. Enhanced notification hook
+- Detect `elicitation_dialog` notifications — extract question text and options from the notification payload
+- Display rich Discord embeds showing the exact question Claude is asking, with all options listed
+- Include project name, session ID, and working directory
+- User sees full context on phone and knows whether they need to walk to the terminal
+
+#### 1b. Permission request notifications
+- Add a `PermissionRequest` hook that sends rich notifications showing the tool name, command/input, and project
+- Include Allow/Deny buttons — these connect to the relay service (Component 3) to pipe the answer back
+- This is the one interaction that CAN be fully bridged terminal → Discord → terminal
+
+### Component 2: Discord Bot Enhancements
+
+#### 2a. Multi-project `/project` command
 - `/project list` — lists all directories in `C:\Users\Shuha\projects\`
 - `/project set <name>` — switches the bot's working directory to that project
 - Autocomplete from project folder names
 - Current project shown in bot status / startup message
 
-#### 1c. Default to interactive permissions
+#### 2b. Default to interactive permissions
 - Default permission mode: `acceptEdits` (auto-allows reads + edits)
 - Interactive permission buttons for Bash commands (Allow/Deny)
 - So Claude can work autonomously while you're on mobile, only stopping for shell commands
 
-### Component 2: Terminal-to-Discord Bridge (the relay)
+#### 2c. Auto-start on Shuputer boot
+- Windows Task Scheduler runs `deno task start` on login
+- Bot stays running 24/7
 
-#### Architecture
+### Component 3: Permission Bridge (Relay Service)
+
+For terminal permission requests ONLY (the one thing hooks CAN bridge):
 
 ```
 Terminal Claude Code session
     ↓
-[PreToolUse hook] intercepts AskUserQuestion / tool permission requests
+[PermissionRequest hook] fires for Bash/Write/etc.
     ↓
-Hook script → POST to relay API (localhost:8199)
+Hook script → POST to relay API (localhost:8199/permission)
     ↓
-Relay API → posts to Discord channel via webhook
-    → Discord shows question embed + buttons
+Relay → sends Discord embed with Allow/Deny buttons
     → User taps button on phone
-    → Discord bot → POST answer back to relay API
+    → Discord bot → POST decision back to relay
     ↓
-Hook script ← long-polls relay API for answer
+Hook script ← long-polls relay for decision
     ↓
-Hook returns { decision: "allow", updatedInput: { answers: {...} } }
+Hook returns allow or deny JSON
     ↓
-Terminal Claude Code continues (TUI prompt never shown)
+Terminal Claude Code continues or skips the tool
 ```
 
-#### 2a. Relay service (`claude-relay`)
-- Location: `C:\Users\Shuha\projects\claude-code-discord\relay\`
+#### 3a. Relay service
+- Location: `claude-code-discord/relay/`
 - Tiny Deno HTTP server on `localhost:8199`
 - Endpoints:
-  - `POST /question` — hook posts question, gets back `questionId`
-  - `GET /answer/:questionId` — hook long-polls for answer (30s timeout, retry)
-  - `POST /answer/:questionId` — Discord bot posts user's button selection
-  - `POST /permission` — hook posts tool permission request, gets back `permissionId`
-  - `GET /permission/:permissionId` — hook long-polls for allow/deny
-  - `POST /permission/:permissionId` — Discord bot posts allow/deny decision
-- In-memory store (Map), no database
-- Auto-cleanup of stale requests after 10 minutes
-- Runs alongside the Discord bot (can be started together)
+  - `POST /permission` — hook posts permission request, gets `permissionId`
+  - `GET /permission/:id` — hook long-polls for decision (30s timeout, retry)
+  - `POST /permission/:id/decide` — Discord bot posts allow/deny
+- In-memory Map, auto-cleanup after 10 min
 
-#### 2b. Claude Code hooks
-- Location: `C:\Users\Shuha\.claude\hooks\`
-- Two hook scripts:
+#### 3b. Permission hook script
+- `~/.claude/hooks/permission-bridge.sh`
+- Registered on `PermissionRequest` event (not `PreToolUse`)
+- Posts tool name + input to relay, long-polls for decision
+- Falls through to TUI if relay is unreachable
 
-**`pre-tool-use-ask-user.sh`** — intercepts `AskUserQuestion` tool:
-1. Reads hook input JSON from stdin (contains `tool_name` and `tool_input`)
-2. If `tool_name` is `AskUserQuestion`, extracts questions + options
-3. POSTs to `localhost:8199/question` with full question data
-4. Gets back `questionId`
-5. Long-polls `localhost:8199/answer/:questionId` until answer arrives
-6. Returns JSON: `{ "decision": "allow", "updatedInput": { "questions": [...], "answers": {...} } }`
-7. If relay is unreachable, falls through to TUI (returns `{ "decision": "allow" }` without updatedInput)
+#### 3c. Discord bot integration
+- Relay forwards to Discord webhook/bot channel
+- Bot shows rich embed + Allow/Deny buttons (reuses existing permission embed code)
+- Button click → POST to relay → hook gets answer
 
-**`pre-tool-use-permissions.sh`** — intercepts tool permission requests:
-1. Reads hook input JSON from stdin
-2. For tools that need permission (Bash, Write, etc.), POSTs to `localhost:8199/permission`
-3. Long-polls for allow/deny response
-4. Returns `{ "decision": "allow" }` or `{ "decision": "block", "reason": "Denied from Discord" }`
-5. If relay unreachable, falls through to TUI
+### Component 4: CLI wrapper (convenience)
 
-#### 2c. Discord bot integration
-- When relay receives a question/permission, it forwards to Discord via webhook URL
-- The Discord bot (or a webhook listener) creates the same rich embeds + buttons used for `/claude` sessions
-- When user clicks a button, the bot POSTs the answer back to the relay
-- The relay resolves the long-poll, and the hook script gets the answer
+- `cm "fix the bug in conductops"` — sends prompt to Discord bot
+- Sessions run through Discord bot (full mobile interactivity including AskUserQuestion)
+- For when you want to start from terminal but have mobile access
 
-### Component 3: CLI wrapper (convenience)
+## Interaction Matrix
 
-- `cm "fix the bug in conductops"` — bash alias/script
-- Sends the prompt to the Discord bot (via relay API or Discord slash command API)
-- Runs the session through the Discord bot, not terminal TUI
-- For when you want to start from terminal but interact via Discord
+| Scenario | AskUserQuestion | Permission Requests | Start Session |
+|----------|----------------|-------------------|--------------|
+| Discord `/claude` (phone) | Full buttons + response | Full Allow/Deny buttons | `/claude prompt:...` |
+| Terminal + rich notifications | See question on Discord, answer at terminal | Answer from Discord via relay bridge | Type in terminal |
+| `cm` CLI wrapper | Full buttons (via Discord bot) | Full Allow/Deny (via Discord bot) | `cm "prompt"` |
 
 ## Phasing
 
-### Phase 1: Discord bot enhancements (quick wins)
-- [ ] Auto-start via Task Scheduler
+### Phase 1: Rich notifications + bot enhancements
+- [ ] Enhance `discord-notify.sh` for rich `elicitation_dialog` content
+- [ ] Add `PermissionRequest` notification hook
 - [ ] `/project` command with autocomplete
 - [ ] Default to `acceptEdits` + interactive permissions
+- [ ] Auto-start via Task Scheduler
 
-### Phase 2: Relay service + hooks (core bridge)
+### Phase 2: Permission bridge (relay service)
 - [ ] Build relay server (`relay/server.ts`)
-- [ ] Build Discord webhook integration in relay
-- [ ] Write `pre-tool-use-ask-user` hook script
-- [ ] Write `pre-tool-use-permissions` hook script
-- [ ] Wire Discord bot to POST answers back to relay
-- [ ] Test end-to-end: terminal session → Discord question → phone answer → terminal continues
+- [ ] Write `permission-bridge.sh` hook
+- [ ] Wire Discord bot to POST decisions back to relay
+- [ ] Test end-to-end: terminal → permission → Discord → tap Allow → terminal continues
 
-### Phase 3: Polish + CLI wrapper
-- [ ] `cm` CLI wrapper alias/script
-- [ ] Multi-session support (multiple terminal sessions, each with its own Discord thread)
-- [ ] Notification preferences (which projects to notify for)
-- [ ] Graceful fallback when relay is down (TUI takes over)
+### Phase 3: CLI wrapper + polish
+- [ ] `cm` CLI wrapper
+- [ ] Multi-session support (concurrent terminal sessions)
+- [ ] Notification preferences per project
 
 ## Key Decisions
 
-- **Relay on localhost:8199** — keeps it simple, no auth needed, no external exposure
-- **Long-polling** (not WebSockets) — simpler to implement in shell hooks, Deno server, and Discord bot
-- **Graceful fallback** — if relay is down, hooks return `allow` without modification and TUI works normally
-- **Same Discord channel** — terminal bridge messages go to the same bot channel, so all context is in one place
-- **PreToolUse hooks** — this is the only hook type that can intercept and modify tool behavior before execution
-
-## Risks
-
-- **Hook script timeout**: If Discord answer takes too long, the hook might time out. Mitigation: generous timeout (5 min), retry logic.
-- **Multiple sessions**: If two terminal sessions both send questions, the relay needs to handle concurrent requests. Mitigation: unique IDs per request.
-- **Hook shell environment**: Claude Code hooks run as shell scripts. On Windows, this means Git Bash. Need to ensure `curl` is available for HTTP calls from hooks.
+- **Relay on localhost:8199** — simple, no auth, no external exposure
+- **Long-polling** — simpler than WebSockets for shell hook scripts
+- **Graceful fallback** — if relay is down, TUI works normally
+- **AskUserQuestion = notification only** — technical limitation of Claude Code hooks
+- **Permissions = full bridge** — hooks CAN intercept and return decisions
+- **For full mobile**: Use Discord bot `/claude` or `cm` wrapper (the only way to get AskUserQuestion interactivity remotely)

@@ -210,6 +210,15 @@ export async function createClaudeCodeBot(config: BotConfig) {
     expandableContent
   );
 
+  // Create autocomplete handlers for commands that need them
+  const autocompleteHandlers = new Map<string, (cmd: string, focused: string, typed: string, opts: Record<string, string | null>) => Promise<{ name: string; value: string }[]>>();
+  autocompleteHandlers.set('project', async (_cmd, focused, typed, _opts) => {
+    if (focused === 'name') {
+      return await allHandlers.project.autocompleteProjectName(typed);
+    }
+    return [];
+  });
+
   // Create dependencies object for Discord bot
   const dependencies: BotDependencies = {
     commands: getAllCommands(),
@@ -218,6 +227,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
     onContinueSession: async (ctx) => {
       await allHandlers.claude.onContinue(ctx);
     },
+    autocompleteHandlers,
   };
 
   // Create Discord bot

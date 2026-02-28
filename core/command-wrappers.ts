@@ -541,6 +541,42 @@ function createInfoCommandsMap(
 }
 
 // ================================
+// Project Command Handlers
+// ================================
+
+/**
+ * Create project command handlers.
+ */
+function createProjectCommandHandlers(
+  handlers: AllHandlers,
+  _crashHandler: ProcessCrashHandler
+): Map<string, { execute: (ctx: InteractionContext) => Promise<void> }> {
+  const { project: projectHandler } = handlers;
+
+  return new Map([
+    ['project', {
+      execute: async (ctx: InteractionContext) => {
+        await ctx.deferReply();
+        const action = ctx.getString('action', true)!;
+        const name = ctx.getString('name');
+        try {
+          const result = await projectHandler.onProject(ctx, action, name || undefined);
+          if (result.embeds) {
+            await ctx.editReply({ embeds: result.embeds });
+          } else if (result.content) {
+            await ctx.editReply({ content: result.content });
+          }
+        } catch (error) {
+          const errorFormatted = formatError(error instanceof Error ? error : new Error(String(error)), 'project');
+          const { embed } = createFormattedEmbed('Error', errorFormatted.formatted, 0xff0000);
+          await ctx.editReply({ embeds: [embed] });
+        }
+      }
+    }],
+  ]);
+}
+
+// ================================
 // Master Command Handler Factory
 // ================================
 
@@ -568,6 +604,7 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
   const settingsHandlers = createSettingsCommandHandlers(handlers);
   const screenshotHandlers = createScreenshotCommandHandlers(handlers);
   const infoCommandHandlers = createInfoCommandsMap(handlers);
+  const projectHandlers = createProjectCommandHandlers(handlers, crashHandler);
 
   // Create git/shell deps
   const gitShellDeps: GitShellHandlerDeps = {
@@ -594,6 +631,7 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
     ...gitHandlers,
     ...shellHandlers,
     ...utilityHandlers,
+    ...projectHandlers,
   ]);
 
   return commandHandlers;

@@ -88,6 +88,14 @@ export interface SlashCommand {
   toJSON(): any;
 }
 
+/** Autocomplete handler: receives (commandName, focusedOptionName, typedValue, allOptions) and returns choices */
+export type AutocompleteHandler = (
+  commandName: string,
+  focusedName: string,
+  typedValue: string,
+  allOptions: Record<string, string | null>,
+) => Promise<{ name: string; value: string }[]>;
+
 export interface BotDependencies {
   commands: SlashCommand[];
   cleanSessionId?: (sessionId: string) => string;
@@ -95,4 +103,6 @@ export interface BotDependencies {
   botSettings?: BotSettings;
   /** Callback to actually continue a Claude session from a button click */
   onContinueSession?: (ctx: InteractionContext) => Promise<void>;
+  /** Extra autocomplete handlers keyed by command name */
+  autocompleteHandlers?: Map<string, AutocompleteHandler>;
 }

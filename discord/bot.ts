@@ -285,29 +285,50 @@ export async function createDiscordBot(
     }
   }
 
-  // Autocomplete handler for /settings action & value fields
+  // Autocomplete handler for /settings action & value fields + extra handlers
   async function handleAutocomplete(interaction: AutocompleteInteraction) {
-    if (interaction.commandName !== 'settings') return;
-
     const focused = interaction.options.getFocused(true);
-    const category = interaction.options.getString('category') ?? '';
-    const action = interaction.options.getString('action') ?? '';
     const typed = focused.value.toLowerCase();
 
-    let choices: { name: string; value: string }[] = [];
+    // Built-in: /settings autocomplete
+    if (interaction.commandName === 'settings') {
+      const category = interaction.options.getString('category') ?? '';
+      const action = interaction.options.getString('action') ?? '';
 
-    if (focused.name === 'action') {
-      choices = SETTINGS_ACTIONS[category] ?? [];
-    } else if (focused.name === 'value') {
-      choices = SETTINGS_VALUES[action] ?? [];
+      let choices: { name: string; value: string }[] = [];
+
+      if (focused.name === 'action') {
+        choices = SETTINGS_ACTIONS[category] ?? [];
+      } else if (focused.name === 'value') {
+        choices = SETTINGS_VALUES[action] ?? [];
+      }
+
+      // Filter by what the user has typed so far
+      const filtered = choices
+        .filter(c => c.name.toLowerCase().includes(typed) || c.value.toLowerCase().includes(typed))
+        .slice(0, 25); // Discord max 25 choices
+
+      await interaction.respond(filtered);
+      return;
     }
 
-    // Filter by what the user has typed so far
-    const filtered = choices
-      .filter(c => c.name.toLowerCase().includes(typed) || c.value.toLowerCase().includes(typed))
-      .slice(0, 25); // Discord max 25 choices
+    // Delegate to extra autocomplete handlers (e.g. /project)
+    const extraHandler = dependencies.autocompleteHandlers?.get(interaction.commandName);
+    if (extraHandler) {
+      // Collect all option values for context
+      const allOptions: Record<string, string | null> = {};
+      for (const opt of interaction.options.data) {
+        allOptions[opt.name] = typeof opt.value === 'string' ? opt.value : null;
+      }
 
-    await interaction.respond(filtered);
+      const choices = await extraHandler(
+        interaction.commandName,
+        focused.name,
+        focused.value,
+        allOptions,
+      );
+      await interaction.respond(choices.slice(0, 25));
+    }
   }
   
   // Button handler - completely generic

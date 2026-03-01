@@ -172,6 +172,8 @@ export const agentCommand = new SlashCommandBuilder()
 
 export interface AgentHandlerDeps {
   workDir: string;
+  /** Dynamic workDir getter — always returns the current project directory */
+  getWorkDir?: () => string;
   crashHandler: any;
   sendClaudeMessages: (messages: any[]) => Promise<void>;
   sessionManager: any;
@@ -227,7 +229,8 @@ async function saveAgentSessions(): Promise<void> {
 }
 
 export function createAgentHandlers(deps: AgentHandlerDeps) {
-  const { workDir, crashHandler, sendClaudeMessages, sessionManager } = deps;
+  const { crashHandler, sendClaudeMessages, sessionManager } = deps;
+  const getWorkDir = () => deps.getWorkDir?.() ?? deps.workDir;
 
   return {
     async onAgent(
@@ -401,8 +404,11 @@ async function chatWithAgent(
   includeSystemInfo?: boolean,
   deps?: AgentHandlerDeps
 ) {
+  // Capture workDir BEFORE any await to prevent race conditions
+  const workDir = deps?.getWorkDir?.() ?? deps?.workDir ?? Deno.cwd();
+
   await ensureAgentPersistence();
-  
+
   const userId = ctx.user.id;
   const activeAgentName = agentName || currentUserAgent[userId];
 
@@ -437,7 +443,7 @@ async function chatWithAgent(
 
   // Add context if requested
   if (includeSystemInfo) {
-    const systemInfo = `System: ${Deno.build.os} ${Deno.build.arch}\nWorking Directory: ${deps?.workDir}`;
+    const systemInfo = `System: ${Deno.build.os} ${Deno.build.arch}\nWorking Directory: ${workDir}`;
     enhancedPrompt += `\n\nSystem Context:\n${systemInfo}`;
   }
 
@@ -479,7 +485,7 @@ async function chatWithAgent(
     const result = await enhancedClaudeQuery(
       enhancedPrompt,
       {
-        workDir: deps?.workDir || Deno.cwd(),
+        workDir,
         // Use native SDK agent support — SDK applies agent's systemPrompt + model automatically
         agent: activeAgentName,
         agents: SDK_AGENTS,

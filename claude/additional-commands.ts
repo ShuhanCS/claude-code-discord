@@ -182,6 +182,8 @@ export const additionalClaudeCommands = [
 
 export interface AdditionalClaudeHandlerDeps {
   workDir: string;
+  /** Dynamic workDir getter — always returns the current project directory */
+  getWorkDir?: () => string;
   getClaudeController: () => AbortController | null;
   setClaudeController: (controller: AbortController | null) => void;
   sendClaudeMessages: (messages: any[]) => Promise<void>;
@@ -193,7 +195,8 @@ export interface AdditionalClaudeHandlerDeps {
 }
 
 export function createAdditionalClaudeHandlers(deps: AdditionalClaudeHandlerDeps) {
-  const { workDir, sessionManager, crashHandler, sendClaudeMessages, settings } = deps;
+  const { sessionManager, crashHandler, sendClaudeMessages, settings } = deps;
+  const getWorkDir = () => deps.getWorkDir?.() ?? deps.workDir;
 
   // Helper: merge runtime options (thinking, operation, proxy) into enhanced query options
   function getRuntimeOpts() {
@@ -214,9 +217,11 @@ export function createAdditionalClaudeHandlers(deps: AdditionalClaudeHandlerDeps
       detailLevel?: string,
       includeExamples?: boolean
     ) {
+      // Capture workDir BEFORE any await to prevent race conditions
+      const workDir = getWorkDir();
       try {
         await ctx.deferReply();
-        
+
         let prompt = `Please explain the following in ${detailLevel || 'detailed'} terms`;
         
         if (includeExamples) {
@@ -272,9 +277,11 @@ export function createAdditionalClaudeHandlers(deps: AdditionalClaudeHandlerDeps
       language?: string,
       contextFiles?: string
     ) {
+      // Capture workDir BEFORE any await to prevent race conditions
+      const workDir = getWorkDir();
       try {
         await ctx.deferReply();
-        
+
         let prompt = `Please help me debug this ${language ? `${language} ` : ''}issue:\n\n${errorOrCode}`;
         
         if (contextFiles) {
@@ -335,9 +342,11 @@ export function createAdditionalClaudeHandlers(deps: AdditionalClaudeHandlerDeps
       focus?: string,
       preserveFunctionality?: boolean
     ) {
+      // Capture workDir BEFORE any await to prevent race conditions
+      const workDir = getWorkDir();
       try {
         await ctx.deferReply();
-        
+
         let prompt = `Please optimize this code`;
         
         if (focus) {
@@ -398,9 +407,11 @@ export function createAdditionalClaudeHandlers(deps: AdditionalClaudeHandlerDeps
       includeSecurity?: boolean,
       includePerformance?: boolean
     ) {
+      // Capture workDir BEFORE any await to prevent race conditions
+      const workDir = getWorkDir();
       try {
         await ctx.deferReply();
-        
+
         let prompt = `Please perform a ${reviewType || 'standard'} code review of:\n\n${codeOrFile}\n\nPlease analyze:`;
         
         const analysisPoints = [
@@ -472,9 +483,11 @@ export function createAdditionalClaudeHandlers(deps: AdditionalClaudeHandlerDeps
       type?: string,
       style?: string
     ) {
+      // Capture workDir BEFORE any await to prevent race conditions
+      const workDir = getWorkDir();
       try {
         await ctx.deferReply();
-        
+
         let prompt = `Please generate ${type ? `a ${type}` : 'code'} based on this request: ${request}`;
         
         if (style) {
@@ -531,9 +544,11 @@ export function createAdditionalClaudeHandlers(deps: AdditionalClaudeHandlerDeps
       preserveBehavior?: boolean,
       addTests?: boolean
     ) {
+      // Capture workDir BEFORE any await to prevent race conditions
+      const workDir = getWorkDir();
       try {
         await ctx.deferReply();
-        
+
         let prompt = `Please refactor this code`;
         
         if (goal) {
@@ -598,9 +613,11 @@ export function createAdditionalClaudeHandlers(deps: AdditionalClaudeHandlerDeps
       includeExercises?: boolean,
       stepByStep?: boolean
     ) {
+      // Capture workDir BEFORE any await to prevent race conditions
+      const workDir = getWorkDir();
       try {
         await ctx.deferReply();
-        
+
         let prompt = `Please teach me about "${topic}" at ${level || 'intermediate'} level.`;
         
         if (stepByStep) {

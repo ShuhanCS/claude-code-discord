@@ -1,4 +1,9 @@
-const PROJECTS_DIR = "C:\\Users\\Shuha\\projects";
+/** Derive PROJECTS_DIR from environment — lazy to avoid reading env before .env is loaded */
+function getProjectsDir(): string {
+  return Deno.env.get("PROJECTS_DIR")
+    || Deno.env.get("WORK_DIR")
+    || `${Deno.env.get("USERPROFILE") || Deno.env.get("HOME")}${Deno.build.os === "windows" ? "\\" : "/"}projects`;
+}
 
 export interface ProjectHandlerDeps {
   getWorkDir: () => string;
@@ -12,7 +17,7 @@ export function createProjectHandler(deps: ProjectHandlerDeps) {
       switch (action) {
         case 'list': {
           const entries: string[] = [];
-          for await (const entry of Deno.readDir(PROJECTS_DIR)) {
+          for await (const entry of Deno.readDir(getProjectsDir())) {
             if (entry.isDirectory) {
               entries.push(entry.name);
             }
@@ -28,7 +33,7 @@ export function createProjectHandler(deps: ProjectHandlerDeps) {
               color: 0x0099ff,
               title: 'Projects',
               description: list || 'No projects found',
-              footer: { text: `${entries.length} projects in ${PROJECTS_DIR}` },
+              footer: { text: `${entries.length} projects in ${getProjectsDir()}` },
             }]
           };
         }
@@ -38,14 +43,14 @@ export function createProjectHandler(deps: ProjectHandlerDeps) {
             return { content: 'Provide a project name: `/project action:set name:conductops`' };
           }
           const sep = Deno.build.os === 'windows' ? '\\' : '/';
-          const newDir = `${PROJECTS_DIR}${sep}${name}`;
+          const newDir = `${getProjectsDir()}${sep}${name}`;
           try {
             const stat = await Deno.stat(newDir);
             if (!stat.isDirectory) {
               return { content: `\`${name}\` is not a directory.` };
             }
           } catch {
-            return { content: `Project \`${name}\` not found in ${PROJECTS_DIR}` };
+            return { content: `Project \`${name}\` not found in ${getProjectsDir()}` };
           }
 
           deps.setWorkDir(newDir);
@@ -78,7 +83,7 @@ export function createProjectHandler(deps: ProjectHandlerDeps) {
     async autocompleteProjectName(typed: string): Promise<{ name: string; value: string }[]> {
       const entries: string[] = [];
       try {
-        for await (const entry of Deno.readDir(PROJECTS_DIR)) {
+        for await (const entry of Deno.readDir(getProjectsDir())) {
           if (entry.isDirectory) {
             entries.push(entry.name);
           }

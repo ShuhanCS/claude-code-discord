@@ -32,6 +32,8 @@ export const claudeCommands = [
 
 export interface ClaudeHandlerDeps {
   workDir: string;
+  /** Dynamic workDir getter — always returns the current project directory */
+  getWorkDir?: () => string;
   getClaudeController: () => AbortController | null;
   setClaudeController: (controller: AbortController | null) => void;
   setClaudeSessionId: (sessionId: string | undefined) => void;
@@ -41,23 +43,28 @@ export interface ClaudeHandlerDeps {
 }
 
 export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
-  const { workDir, sendClaudeMessages } = deps;
+  const { sendClaudeMessages } = deps;
+  const getWorkDir = () => deps.getWorkDir?.() ?? deps.workDir;
   
   return {
     // deno-lint-ignore no-explicit-any
     async onClaude(ctx: any, prompt: string, sessionId?: string): Promise<ClaudeResponse> {
+      // Capture workDir BEFORE any await to prevent race conditions
+      // with concurrent commands from different channels
+      const workDir = getWorkDir();
+
       // Cancel any existing session
       const existingController = deps.getClaudeController();
       if (existingController) {
         existingController.abort();
       }
-      
+
       const controller = new AbortController();
       deps.setClaudeController(controller);
-      
+
       // Defer interaction (execute first)
       await ctx.deferReply();
-      
+
       // Send initial message
       await ctx.editReply({
         embeds: [{
@@ -68,7 +75,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
           timestamp: true
         }]
       });
-      
+
       const result = await sendToClaudeCode(
         workDir,
         prompt,
@@ -96,20 +103,23 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
     
     // deno-lint-ignore no-explicit-any
     async onContinue(ctx: any, prompt?: string): Promise<ClaudeResponse> {
+      // Capture workDir BEFORE any await to prevent race conditions
+      const workDir = getWorkDir();
+
       // Cancel any existing session
       const existingController = deps.getClaudeController();
       if (existingController) {
         existingController.abort();
       }
-      
+
       const controller = new AbortController();
       deps.setClaudeController(controller);
-      
+
       const actualPrompt = prompt || "Please continue.";
-      
+
       // Defer interaction
       await ctx.deferReply();
-      
+
       // Send initial message
       const embedData: { color: number; title: string; description: string; timestamp: boolean; fields?: Array<{ name: string; value: string; inline: boolean }> } = {
         color: 0xffff00,
@@ -117,13 +127,13 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
         description: 'Loading latest conversation and waiting for response...',
         timestamp: true
       };
-      
+
       if (prompt) {
         embedData.fields = [{ name: 'Prompt', value: `\`${prompt.substring(0, 1020)}\``, inline: false }];
       }
-      
+
       await ctx.editReply({ embeds: [embedData] });
-      
+
       const result = await sendToClaudeCode(
         workDir,
         actualPrompt,

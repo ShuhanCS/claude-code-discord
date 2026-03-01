@@ -105,4 +105,7 @@ export interface BotDependencies {
   onContinueSession?: (ctx: InteractionContext) => Promise<void>;
   /** Extra autocomplete handlers keyed by command name */
   autocompleteHandlers?: Map<string, AutocompleteHandler>;
+  /** Called when an interaction arrives from a channel other than the default.
+   *  Receives the channel name so the caller can resolve it to a project directory. */
+  onChannelSwitch?: (channelName: string) => void;
 }

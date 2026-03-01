@@ -105,8 +105,10 @@ export interface ButtonHandlerDeps {
   getClaudeSessionId: () => string | undefined;
   /** Function to send Claude messages */
   sendClaudeMessages?: (messages: ClaudeMessage[]) => Promise<void>;
-  /** Working directory */
+  /** Working directory (static fallback) */
   workDir: string;
+  /** Dynamic workDir getter — always returns the current project directory */
+  getWorkDir?: () => string;
 }
 
 /**
@@ -395,7 +397,7 @@ export function createButtonHandlers(
     ['startup:sessions', async (ctx: InteractionContext) => {
       await ctx.deferReply();
       try {
-        const sessions = await readRecentSessions(deps.workDir);
+        const sessions = await readRecentSessions(deps.getWorkDir?.() ?? deps.workDir);
         if (sessions.length === 0) {
           await ctx.editReply({
             embeds: [{

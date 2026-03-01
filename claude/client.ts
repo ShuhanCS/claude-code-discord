@@ -199,8 +199,13 @@ export async function sendToClaudeCode(
       const permMode = modelOptions?.permissionMode || "dontAsk";
       
       // Build environment variables for the subprocess
+      // Strip CLAUDECODE/CLAUDE_CODE_ENTRYPOINT so the child process doesn't think
+      // it's nested inside another Claude Code session (which causes exit code 1).
+      const parentEnv = Object.fromEntries(Object.entries(Deno.env.toObject()));
+      delete parentEnv['CLAUDECODE'];
+      delete parentEnv['CLAUDE_CODE_ENTRYPOINT'];
       const envVars: Record<string, string> = {
-        ...Object.fromEntries(Object.entries(Deno.env.toObject())),
+        ...parentEnv,
         // Enable the Tasks system for subagent background tasks (SDK v0.2.19+)
         CLAUDE_CODE_ENABLE_TASKS: '1',
         // Enable experimental Agent Teams if configured
@@ -261,7 +266,33 @@ export async function sendToClaudeCode(
           // NOTE: The SDK's runtime Zod schema requires `updatedInput` on allow responses
           // even though the TypeScript types mark it optional — pass through original input.
           canUseTool: async (toolName: string, input: Record<string, unknown>) => {
-            // AskUserQuestion: route to Discord interactive flow
+            // Standard Claude Code tools — auto-allow when permission mode allows edits
+            const STANDARD_TOOLS = new Set([
+              'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep',
+              'WebFetch', 'WebSearch', 'Task', 'NotebookEdit', 'NotebookRead',
+              'TodoRead', 'TodoWrite', 'LS', 'EnterPlanMode', 'ExitPlanMode',
+              'AskUserQuestion', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
+            ]);
+            const autoAllowModes = new Set(['acceptEdits', 'bypassPermissions']);
+            if (STANDARD_TOOLS.has(toolName) && autoAllowModes.has(permMode)) {
+              // Special handling for AskUserQuestion — route to Discord
+              if (toolName === 'AskUserQuestion' && modelOptions?.onAskUser) {
+                try {
+                  const askInput = input as unknown as AskUserQuestionInput;
+                  const answers = await modelOptions.onAskUser(askInput);
+                  return {
+                    behavior: 'allow' as const,
+                    updatedInput: { questions: askInput.questions, answers },
+                  };
+                } catch (err) {
+                  console.error('[AskUserQuestion] Failed to collect answers:', err);
+                  return { behavior: 'deny' as const, message: 'User did not respond in time' };
+                }
+              }
+              return { behavior: 'allow' as const, updatedInput: input };
+            }
+
+            // AskUserQuestion: route to Discord interactive flow (non-acceptEdits modes)
             if (toolName === 'AskUserQuestion' && modelOptions?.onAskUser) {
               try {
                 const askInput = input as unknown as AskUserQuestionInput;
@@ -431,6 +462,28 @@ export async function sendToClaudeCode(
     };
   // deno-lint-ignore no-explicit-any
   } catch (error: any) {
+    // Log full error details for debugging (stderr, code, etc.)
+    console.error(`[Claude SDK error] message=${error.message}, stderr=${error.stderr ?? 'N/A'}, code=${error.code ?? 'N/A'}, cwd=${workDir}`);
+
+    // Check if the working directory looks like a valid project (not a bare parent dir)
+    // A valid project typically has .git, CLAUDE.md, package.json, deno.json, etc.
+    let cwdLooksValid = false;
+    try {
+      for (const entry of Deno.readDirSync(workDir)) {
+        if (['.git', 'CLAUDE.md', 'package.json', 'deno.json', 'deno.jsonc', 'Cargo.toml', 'pyproject.toml'].includes(entry.name)) {
+          cwdLooksValid = true;
+          break;
+        }
+      }
+    } catch {
+      // Can't read dir → definitely invalid
+    }
+
+    if (!cwdLooksValid) {
+      // Don't retry — the cwd itself is the problem, not a rate limit
+      throw new Error(`Claude Code failed: working directory "${workDir}" is not a valid project. No .git, CLAUDE.md, or project config found.`);
+    }
+
     // For exit code 1 errors (rate limit), retry with Haiku (cheaper/faster fallback)
     if (error.message && (error.message.includes('exit code 1') || error.message.includes('exited with code 1'))) {
       console.log("Rate limit detected, retrying with Haiku (fast fallback)...");

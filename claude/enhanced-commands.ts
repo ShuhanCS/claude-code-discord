@@ -90,6 +90,8 @@ export const enhancedClaudeCommands = [
 
 export interface EnhancedClaudeHandlerDeps {
   workDir: string;
+  /** Dynamic workDir getter — always returns the current project directory */
+  getWorkDir?: () => string;
   getClaudeController: () => AbortController | null;
   setClaudeController: (controller: AbortController | null) => void;
   setClaudeSessionId: (sessionId: string | undefined) => void;
@@ -101,7 +103,8 @@ export interface EnhancedClaudeHandlerDeps {
 }
 
 export function createEnhancedClaudeHandlers(deps: EnhancedClaudeHandlerDeps) {
-  const { workDir, sessionManager, crashHandler, sendClaudeMessages } = deps;
+  const { sessionManager, crashHandler, sendClaudeMessages } = deps;
+  const getWorkDir = () => deps.getWorkDir?.() ?? deps.workDir;
   
   return {
     async onClaudeEnhanced(
@@ -115,6 +118,9 @@ export function createEnhancedClaudeHandlers(deps: EnhancedClaudeHandlerDeps) {
       sessionId?: string
     ) {
       try {
+        // Capture workDir BEFORE any await to prevent race conditions
+        const workDir = getWorkDir();
+
         // Cancel any existing session
         const existingController = deps.getClaudeController();
         if (existingController) {
@@ -365,6 +371,9 @@ export function createEnhancedClaudeHandlers(deps: EnhancedClaudeHandlerDeps) {
       contextFiles?: string
     ) {
       try {
+        // Capture workDir BEFORE any await
+        const workDir = getWorkDir();
+
         await ctx.deferReply({ ephemeral: true });
 
         const contextParts: string[] = [];

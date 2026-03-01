@@ -33,6 +33,7 @@ import { systemCommands } from "./system/index.ts";
 import { helpCommand } from "./help/index.ts";
 import { agentCommand } from "./agent/index.ts";
 import { cleanupPaginationStates } from "./discord/index.ts";
+import { resolveChannelToProject } from "./project/index.ts";
 import { runVersionCheck, startPeriodicUpdateCheck, BOT_VERSION } from "./util/version-check.ts";
 
 // Core modules - now handle most of the heavy lifting
@@ -64,7 +65,10 @@ export { sendToClaudeCode } from "./claude/index.ts";
  * Create Claude Code Discord Bot with all handlers and integrations.
  */
 export async function createClaudeCodeBot(config: BotConfig) {
-  const { discordToken, applicationId, workDir, repoName, branchName, categoryName, defaultMentionUserId } = config;
+  const { discordToken, applicationId, workDir: initialWorkDir, repoName, branchName, categoryName, defaultMentionUserId } = config;
+
+  // Mutable workDir — updated when commands arrive from project-specific channels
+  let workDir = initialWorkDir;
   
   // Determine category name (use repository name if not specified)
   const actualCategoryName = categoryName || repoName;
@@ -155,6 +159,8 @@ export async function createClaudeCodeBot(config: BotConfig) {
   const allHandlers: AllHandlers = createAllHandlers(
     {
       workDir,
+      getWorkDir: () => workDir,
+      setWorkDir: (dir: string) => { workDir = dir; },
       repoName,
       branchName,
       categoryName: actualCategoryName,
@@ -206,6 +212,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
       getClaudeSessionId: () => claudeSessionId,
       sendClaudeMessages,
       workDir,
+      getWorkDir: () => workDir,
     },
     expandableContent
   );
@@ -228,6 +235,13 @@ export async function createClaudeCodeBot(config: BotConfig) {
       await allHandlers.claude.onContinue(ctx);
     },
     autocompleteHandlers,
+    onChannelSwitch: (channelName: string) => {
+      const resolved = resolveChannelToProject(channelName, workDir);
+      if (resolved !== workDir) {
+        console.log(`[channel-router] Switched to project: ${resolved} (channel: #${channelName})`);
+        workDir = resolved;
+      }
+    },
   };
 
   // Create Discord bot
@@ -248,7 +262,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
     const { startRelayPoller: startPoller, postDecision: postRelayDecision } = await import("./relay/bot-integration.ts");
 
     stopRelayPoller = startPoller(async (perm) => {
-      const channel = bot.getChannel();
+      const channel = bot.getMainChannel();
       if (!channel) return;
 
       const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = await import("npm:discord.js@14.14.1");
@@ -305,7 +319,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
   // Check for updates (non-blocking)
   runVersionCheck().then(async ({ updateAvailable, embed }) => {
     if (updateAvailable && embed) {
-      const channel = bot.getChannel();
+      const channel = bot.getMainChannel();
       if (channel) {
         const { EmbedBuilder } = await import("npm:discord.js@14.14.1");
         const discordEmbed = new EmbedBuilder()
@@ -322,7 +336,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
   // Start periodic update checks (every 12 hours)
   startPeriodicUpdateCheck(async (result) => {
     try {
-      const channel = bot.getChannel();
+      const channel = bot.getMainChannel();
       if (channel) {
         const { EmbedBuilder } = await import("npm:discord.js@14.14.1");
         const embed = new EmbedBuilder()

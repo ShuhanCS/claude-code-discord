@@ -103,8 +103,12 @@ export async function createDiscordBot(
   const actualCategoryName = categoryName || repoName;
   
   let myChannel: TextChannel | null = null;
-  // deno-lint-ignore no-explicit-any no-unused-vars
+  // deno-lint-ignore no-explicit-any
   let myCategory: any = null;
+  let myCategoryId: string | null = null;
+  /** Channel override for multi-channel routing — set during command dispatch
+   *  so streaming callbacks (sendMessage, onAskUser, etc.) send to the right channel */
+  let activeChannelId: string | null = null;
   
   const botSettings = dependencies.botSettings || {
     mentionEnabled: !!config.defaultMentionUserId,
@@ -145,6 +149,7 @@ export async function createDiscordBot(
     }
     
     myCategory = category;
+    myCategoryId = category.id;
     
     let channel = guild.channels.cache.find(
       // deno-lint-ignore no-explicit-any
@@ -241,11 +246,55 @@ export async function createDiscordBot(
     };
   }
   
+  // Check if a channel belongs to our category.
+  // Uses cache first, falls back to API fetch for newly created channels.
+  async function isInOurCategory(channelId: string): Promise<boolean> {
+    // Fast path: it's our default channel
+    if (myChannel && channelId === myChannel.id) return true;
+    if (!myCategoryId) return false;
+    // Look up the channel in the guild's channel cache
+    const guild = client.guilds.cache.first();
+    if (!guild) return false;
+    let ch = guild.channels.cache.get(channelId);
+    // Fallback: fetch from API if not in cache (e.g. newly created channels)
+    if (!ch) {
+      try {
+        const fetched = await guild.channels.fetch(channelId);
+        if (fetched) ch = fetched;
+      } catch {
+        return false;
+      }
+    }
+    if (!ch) return false;
+    return ch.parentId === myCategoryId;
+  }
+
+  // Notify the caller when the interaction comes from a non-default channel
+  async function notifyChannelSwitch(interaction: CommandInteraction | ButtonInteraction): Promise<void> {
+    if (!myChannel || !dependencies.onChannelSwitch) return;
+    if (interaction.channelId === myChannel.id) return;
+    const guild = client.guilds.cache.first();
+    if (!guild) return;
+    let ch = guild.channels.cache.get(interaction.channelId);
+    if (!ch) {
+      try {
+        const fetched = await guild.channels.fetch(interaction.channelId);
+        if (fetched) ch = fetched;
+      } catch { /* cache miss + fetch fail — skip */ }
+    }
+    if (ch && 'name' in ch && typeof ch.name === 'string') {
+      dependencies.onChannelSwitch(ch.name);
+    }
+  }
+
   // Command handler - completely generic
   async function handleCommand(interaction: CommandInteraction) {
-    if (!myChannel || interaction.channelId !== myChannel.id) {
+    if (!await isInOurCategory(interaction.channelId)) {
       return;
     }
+
+    // If the command came from a project channel, update workDir
+    await notifyChannelSwitch(interaction);
     
     const ctx = createInteractionContext(interaction);
 
@@ -263,6 +312,11 @@ export async function createDiscordBot(
       return;
     }
     
+    // Route streaming callbacks (sendMessage, onAskUser, etc.) to THIS channel.
+    // We intentionally do NOT clear activeChannelId after the handler completes —
+    // fire-and-forget sendClaudeMessages calls may still be in flight and need
+    // the correct channel. The next command will set it to its own channel.
+    activeChannelId = interaction.channelId;
     try {
       await handler.execute(ctx);
     } catch (error) {
@@ -333,12 +387,19 @@ export async function createDiscordBot(
   
   // Button handler - completely generic
   async function handleButton(interaction: ButtonInteraction) {
-    if (!myChannel || interaction.channelId !== myChannel.id) {
+    if (!await isInOurCategory(interaction.channelId)) {
       return;
     }
-    
+
+    // If the button came from a project channel, update workDir
+    await notifyChannelSwitch(interaction);
+
+    // Route streaming callbacks to the button's channel
+    activeChannelId = interaction.channelId;
+
     const ctx = createInteractionContext(interaction);
-    
+
+    try {
     // Handle pagination buttons first
     if (interaction.customId.startsWith('pagination:')) {
       try {
@@ -492,6 +553,11 @@ export async function createDiscordBot(
     } else {
       console.warn(`No handler found for button: ${interaction.customId}`);
     }
+    } finally {
+      // activeChannelId intentionally NOT cleared — fire-and-forget
+      // sendClaudeMessages calls may still be in flight. The next
+      // command/button will set it to its own channel.
+    }
   }
   
   // Register commands
@@ -530,7 +596,7 @@ export async function createDiscordBot(
     
     try {
       myChannel = await ensureChannelExists(guild);
-      console.log(`Using channel "${myChannel.name}"`);
+      console.log(`Using channel "${myChannel.name}" (category ID: ${myCategoryId})`);
       
       await myChannel.send(convertMessageContent({
         embeds: [{
@@ -576,8 +642,20 @@ export async function createDiscordBot(
   // Return bot control functions
   return {
     client,
+    /** Returns the active command channel (for streaming output) or falls back to main */
     getChannel() {
+      if (activeChannelId) {
+        const ch = client.channels.cache.get(activeChannelId);
+        if (ch) return ch as TextChannel;
+      }
       return myChannel;
+    },
+    /** Always returns the main/default channel — for notifications, startup messages, etc. */
+    getMainChannel() {
+      return myChannel;
+    },
+    setActiveChannel(channelId: string | null) {
+      activeChannelId = channelId;
     },
     updateBotSettings(settings: { mentionEnabled: boolean; mentionUserId: string | null }) {
       botSettings.mentionEnabled = settings.mentionEnabled;

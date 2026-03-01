@@ -147,6 +147,10 @@ export interface AllHandlers {
 export interface HandlerRegistryDeps {
   /** Working directory */
   workDir: string;
+  /** Dynamic workDir getter — when provided, Claude handlers use this instead of the static workDir */
+  getWorkDir?: () => string;
+  /** Dynamic workDir setter — updates the mutable workDir in index.ts */
+  setWorkDir?: (dir: string) => void;
   /** Repository name */
   repoName: string;
   /** Branch name */
@@ -505,8 +509,12 @@ export function createAllHandlers(
     return opts;
   }
 
+  // Build a dynamic workDir getter: prefer deps.getWorkDir (channel-aware), fall back to static deps.workDir
+  const getWorkDir = deps.getWorkDir ?? (() => deps.workDir);
+
   const claudeHandlers = createClaudeHandlers({
     workDir,
+    getWorkDir,
     getClaudeController: claudeSession.getController,
     setClaudeController: claudeSession.setController,
     setClaudeSessionId: claudeSession.setSessionId,
@@ -550,6 +558,7 @@ export function createAllHandlers(
 
   const enhancedClaudeHandlers = createEnhancedClaudeHandlers({
     workDir,
+    getWorkDir,
     getClaudeController: claudeSession.getController,
     setClaudeController: claudeSession.setController,
     setClaudeSessionId: claudeSession.setSessionId,
@@ -566,6 +575,7 @@ export function createAllHandlers(
 
   const additionalClaudeHandlers = createAdditionalClaudeHandlers({
     workDir,
+    getWorkDir,
     getClaudeController: claudeSession.getController,
     setClaudeController: claudeSession.setController,
     sendClaudeMessages,
@@ -590,6 +600,7 @@ export function createAllHandlers(
 
   const agentHandlers = createAgentHandlers({
     workDir,
+    getWorkDir,
     crashHandler,
     sendClaudeMessages,
     sessionManager: claudeSessionManager,
@@ -608,8 +619,8 @@ export function createAllHandlers(
   });
 
   const projectHandler = createProjectHandler({
-    getWorkDir: () => deps.workDir,
-    setWorkDir: (dir: string) => { deps.workDir = dir; },
+    getWorkDir,
+    setWorkDir: deps.setWorkDir ?? ((dir: string) => { deps.workDir = dir; }),
   });
 
   return {

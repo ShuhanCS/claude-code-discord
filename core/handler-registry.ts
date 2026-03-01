@@ -28,6 +28,7 @@ import { agentCommand, createAgentHandlers } from "../agent/index.ts";
 import { screenshotCommands, createScreenshotHandlers } from "../screenshot/index.ts";
 import { infoCommands, createInfoCommandHandlers } from "../claude/index.ts";
 import { projectCommands, syncCommand, createProjectHandler } from "../project/index.ts";
+import { taskCommand, createTaskHandlers } from "../task/index.ts";
 import { cleanSessionId, ClaudeSessionManager } from "../claude/index.ts";
 import type { ClaudeModelOptions } from "../claude/index.ts";
 import type { AskUserCallback } from "../claude/index.ts";
@@ -139,6 +140,7 @@ export interface AllHandlers {
   screenshot: ReturnType<typeof createScreenshotHandlers>;
   infoCommands: ReturnType<typeof createInfoCommandHandlers>;
   project: ReturnType<typeof createProjectHandler>;
+  task: ReturnType<typeof createTaskHandlers>;
 }
 
 /**
@@ -628,6 +630,8 @@ export function createAllHandlers(
     getBot: deps.getBot,
   });
 
+  const taskHandlers = createTaskHandlers();
+
   return {
     claude: claudeHandlers,
     enhancedClaude: enhancedClaudeHandlers,
@@ -643,6 +647,7 @@ export function createAllHandlers(
     screenshot: screenshotHandlers,
     infoCommands: infoCommandHandlers,
     project: projectHandler,
+    task: taskHandlers,
   };
 }
 
@@ -668,6 +673,7 @@ export function getAllCommands() {
     ...projectCommands,
     syncCommand,
     helpCommand,
+    taskCommand,
   ];
 }
 

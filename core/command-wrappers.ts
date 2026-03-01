@@ -596,6 +596,51 @@ function createProjectCommandHandlers(
 }
 
 // ================================
+// Task Command Handlers
+// ================================
+
+/**
+ * Create task board command handlers.
+ */
+function createTaskCommandHandlers(
+  handlers: AllHandlers,
+  crashHandler: ProcessCrashHandler
+): Map<string, { execute: (ctx: InteractionContext) => Promise<void> }> {
+  const { task: taskHandlers } = handlers;
+
+  return new Map([
+    ['task', {
+      execute: async (ctx: InteractionContext) => {
+        await ctx.deferReply();
+        const action = ctx.getString('action', true)!;
+        const id = ctx.getString('id');
+        const title = ctx.getString('title');
+        const proof = ctx.getString('proof');
+        const parent = ctx.getString('parent');
+        const status = ctx.getString('status');
+        try {
+          const result = await taskHandlers.onTask(
+            ctx, action,
+            id || undefined, title || undefined, proof || undefined,
+            parent || undefined, status || undefined,
+          );
+          if (result.embeds) {
+            await ctx.editReply({ embeds: result.embeds });
+          } else if (result.content) {
+            await ctx.editReply({ content: result.content });
+          }
+        } catch (error) {
+          const errorFormatted = formatError(error instanceof Error ? error : new Error(String(error)), 'task');
+          const { embed } = createFormattedEmbed('Task Error', errorFormatted.formatted, 0xff0000);
+          await ctx.editReply({ embeds: [embed] });
+          await crashHandler.reportCrash('main', error instanceof Error ? error : new Error(String(error)), 'task-command');
+        }
+      }
+    }],
+  ]);
+}
+
+// ================================
 // Master Command Handler Factory
 // ================================
 
@@ -638,6 +683,7 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
   const gitHandlers = createGitCommandHandlers(gitShellDeps);
   const shellHandlers = createShellCommandHandlers(gitShellDeps);
   const utilityHandlers = createUtilityCommandHandlers(gitShellDeps);
+  const taskHandlers = createTaskCommandHandlers(handlers, crashHandler);
 
   // Combine all handlers into single map
   const commandHandlers: CommandHandlers = new Map([
@@ -651,6 +697,7 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
     ...shellHandlers,
     ...utilityHandlers,
     ...projectHandlers,
+    ...taskHandlers,
   ]);
 
   return commandHandlers;

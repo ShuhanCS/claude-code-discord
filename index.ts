@@ -226,6 +226,15 @@ export async function createClaudeCodeBot(config: BotConfig) {
     }
     return [];
   });
+  autocompleteHandlers.set('task', async (_cmd, focused, typed, _opts) => {
+    if (focused === 'id') {
+      return await allHandlers.task.autocompleteTaskId(typed);
+    }
+    if (focused === 'parent') {
+      return await allHandlers.task.autocompleteParentId(typed);
+    }
+    return [];
+  });
 
   // Create dependencies object for Discord bot
   const dependencies: BotDependencies = {

@@ -5,6 +5,7 @@
 
 import { ensureDir } from "https://deno.land/std@0.208.0/fs/mod.ts";
 import * as path from "https://deno.land/std@0.208.0/path/mod.ts";
+import type { TaskStore } from "../task/types.ts";
 
 // Default data directory - relative to working directory
 const DEFAULT_DATA_DIR = ".bot-data";
@@ -198,6 +199,7 @@ export interface BotPersistentData {
 let todosManager: PersistenceManager<TodoItem[]> | null = null;
 let mcpServersManager: PersistenceManager<MCPServerConfig[]> | null = null;
 let agentSessionsManager: PersistenceManager<AgentSessionData[]> | null = null;
+let taskStoreManager: PersistenceManager<TaskStore> | null = null;
 
 /**
  * Get or create the todos persistence manager
@@ -230,6 +232,16 @@ export function getAgentSessionsManager(dataDir?: string): PersistenceManager<Ag
 }
 
 /**
+ * Get or create the task store persistence manager
+ */
+export function getTaskStoreManager(dataDir?: string): PersistenceManager<TaskStore> {
+  if (!taskStoreManager) {
+    taskStoreManager = new PersistenceManager<TaskStore>("tasks", { dataDir });
+  }
+  return taskStoreManager;
+}
+
+/**
  * Initialize all persistence managers
  */
 export async function initAllPersistence(dataDir?: string): Promise<void> {
@@ -237,6 +249,7 @@ export async function initAllPersistence(dataDir?: string): Promise<void> {
     getTodosManager(dataDir),
     getMCPServersManager(dataDir),
     getAgentSessionsManager(dataDir),
+    getTaskStoreManager(dataDir),
   ];
 
   await Promise.all(managers.map(m => m.init()));
@@ -250,12 +263,14 @@ export async function loadAllData(dataDir?: string): Promise<{
   todos: TodoItem[];
   mcpServers: MCPServerConfig[];
   agentSessions: AgentSessionData[];
+  taskStore: TaskStore;
 }> {
-  const [todos, mcpServers, agentSessions] = await Promise.all([
+  const [todos, mcpServers, agentSessions, taskStore] = await Promise.all([
     getTodosManager(dataDir).load([]),
     getMCPServersManager(dataDir).load([]),
     getAgentSessionsManager(dataDir).load([]),
+    getTaskStoreManager(dataDir).load({ nextId: 1, tasks: [] }),
   ]);
 
-  return { todos, mcpServers, agentSessions };
+  return { todos, mcpServers, agentSessions, taskStore };
 }

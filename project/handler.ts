@@ -91,7 +91,7 @@ export function createProjectHandler(deps: ProjectHandlerDeps) {
         };
       }
 
-      const result = await bot.resyncChannels(maxAge ?? 30);
+      const result = await bot.resyncChannels(maxAge ?? 7);
       const fields: { name: string; value: string; inline?: boolean }[] = [];
 
       if (result.created.length > 0) {
@@ -123,7 +123,7 @@ export function createProjectHandler(deps: ProjectHandlerDeps) {
         embeds: [{
           color: 0x00ff00,
           title: 'Channel Sync Complete',
-          description: `Scanned projects with commits in last ${maxAge ?? 30} days`,
+          description: `Scanned projects with commits in last ${maxAge ?? 7} days`,
           fields,
           timestamp: true,
         }]

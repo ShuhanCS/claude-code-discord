@@ -129,7 +129,7 @@ export async function createDiscordBot(
 
   // Channel management — ensures category exists and syncs all project channels
   // deno-lint-ignore no-explicit-any
-  async function ensureAllChannelsExist(guild: any, maxAgeDays = 30): Promise<{ channel: TextChannel; syncResult: SyncResult }> {
+  async function ensureAllChannelsExist(guild: any, maxAgeDays = 7): Promise<{ channel: TextChannel; syncResult: SyncResult }> {
     const channelName = sanitizeChannelName(branchName);
 
     console.log(`Checking category "${actualCategoryName}"...`);
@@ -726,7 +726,7 @@ export async function createDiscordBot(
       return { ...botSettings };
     },
     /** Re-scan projects and sync channels. Returns SyncResult. */
-    async resyncChannels(maxAgeDays = 30): Promise<SyncResult> {
+    async resyncChannels(maxAgeDays = 7): Promise<SyncResult> {
       const guild = client.guilds.cache.first();
       if (!guild || !myCategoryId) {
         return { created: [], existing: [], stale: [] };

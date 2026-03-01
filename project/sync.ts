@@ -118,7 +118,7 @@ export function getBotProjectDir(): string {
  */
 export async function scanActiveProjects(
   projectsDir: string,
-  maxAgeDays = 30
+  maxAgeDays = 7
 ): Promise<ProjectInfo[]> {
   const projects: ProjectInfo[] = [];
   const sep = Deno.build.os === "windows" ? "\\" : "/";
@@ -207,16 +207,20 @@ export async function scanActiveProjects(
 // Channel Sync
 // ================================
 
+/** Discord allows max 50 text channels per category */
+const DISCORD_CATEGORY_CHANNEL_LIMIT = 50;
+
 /**
  * Sync Discord channels to match active projects.
  *
- * Creates missing channels (one per project), reports stale channels
- * (channels with no matching project), and ensures special channels exist.
- * Never deletes channels — stale channels are reported only.
+ * Creates special channels first (#general, #discord-bot), then fills
+ * remaining slots with the most recently active projects. Respects
+ * Discord's 50-channel-per-category limit. Reports stale channels
+ * (channels with no matching project) but never deletes them.
  *
  * @param guild - Discord.js Guild object
  * @param categoryId - ID of the bot's category
- * @param projects - Active projects from scanActiveProjects()
+ * @param projects - Active projects from scanActiveProjects() (already sorted by recency)
  * @returns SyncResult with created/existing/stale channel names
  */
 // deno-lint-ignore no-explicit-any
@@ -250,34 +254,19 @@ export async function syncChannelsToProjects(
     existingNames.add(ch.name);
   });
 
-  // Create missing project channels (serial to respect rate limits)
-  for (const project of projects) {
-    if (existingNames.has(project.channelName)) {
-      existing.push(project.channelName);
-      continue;
-    }
+  // Track current channel count in category
+  let channelCount = existingNames.size;
 
-    try {
-      await guild.channels.create({
-        name: project.channelName,
-        type: ChannelType.GuildText,
-        parent: categoryId,
-        topic: `Project: ${project.name} | Branch: ${project.branch} | Path: ${project.path}`,
-      });
-      created.push(project.channelName);
-      console.log(`[sync] Created channel #${project.channelName}`);
-    } catch (err) {
-      console.error(
-        `[sync] Failed to create channel #${project.channelName}: ${err}`
-      );
-    }
-  }
-
-  // Create missing special channels
+  // 1. Special channels FIRST — guaranteed slots
   for (const special of SPECIAL_CHANNELS) {
     if (existingNames.has(special.name)) {
       existing.push(special.name);
       continue;
+    }
+
+    if (channelCount >= DISCORD_CATEGORY_CHANNEL_LIMIT) {
+      console.warn(`[sync] Hit ${DISCORD_CATEGORY_CHANNEL_LIMIT}-channel limit — cannot create #${special.name}`);
+      break;
     }
 
     try {
@@ -288,10 +277,40 @@ export async function syncChannelsToProjects(
         topic: special.topic,
       });
       created.push(special.name);
+      channelCount++;
       console.log(`[sync] Created special channel #${special.name}`);
     } catch (err) {
       console.error(
         `[sync] Failed to create special channel #${special.name}: ${err}`
+      );
+    }
+  }
+
+  // 2. Project channels — fill remaining slots (projects already sorted by recency)
+  for (const project of projects) {
+    if (existingNames.has(project.channelName)) {
+      existing.push(project.channelName);
+      continue;
+    }
+
+    if (channelCount >= DISCORD_CATEGORY_CHANNEL_LIMIT) {
+      console.log(`[sync] Hit ${DISCORD_CATEGORY_CHANNEL_LIMIT}-channel limit — skipping remaining ${projects.length - projects.indexOf(project)} projects`);
+      break;
+    }
+
+    try {
+      await guild.channels.create({
+        name: project.channelName,
+        type: ChannelType.GuildText,
+        parent: categoryId,
+        topic: `Project: ${project.name} | Branch: ${project.branch} | Path: ${project.path}`,
+      });
+      created.push(project.channelName);
+      channelCount++;
+      console.log(`[sync] Created channel #${project.channelName}`);
+    } catch (err) {
+      console.error(
+        `[sync] Failed to create channel #${project.channelName}: ${err}`
       );
     }
   }

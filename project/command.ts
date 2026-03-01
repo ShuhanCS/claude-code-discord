@@ -25,5 +25,5 @@ export const syncCommand = new SlashCommandBuilder()
   .setDescription('Re-scan projects and sync Discord channels')
   .addIntegerOption(option =>
     option.setName('max-age')
-      .setDescription('Max days since last commit (default: 30)')
+      .setDescription('Max days since last commit (default: 7)')
       .setRequired(false));

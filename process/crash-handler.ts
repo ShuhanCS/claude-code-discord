@@ -1,6 +1,7 @@
 // Enhanced process crash handling and recovery
 import type { ShellManager } from "../shell/handler.ts";
 import type { WorktreeBotManager } from "../git/process-manager.ts";
+import { reportError } from "../monitoring/error-reporter.ts";
 
 export interface CrashReport {
   timestamp: Date;
@@ -64,6 +65,9 @@ export class ProcessCrashHandler {
     };
 
     this.crashes.push(report);
+
+    // Write to error_log.json for self-healing pipeline
+    reportError(error, `${processType}:${processId ?? ""}:${context ?? ""}`);
 
     // Keep only last 100 crash reports
     if (this.crashes.length > 100) {

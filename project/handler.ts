@@ -1,13 +1,11 @@
-/** Derive PROJECTS_DIR from environment — lazy to avoid reading env before .env is loaded */
-function getProjectsDir(): string {
-  return Deno.env.get("PROJECTS_DIR")
-    || Deno.env.get("WORK_DIR")
-    || `${Deno.env.get("USERPROFILE") || Deno.env.get("HOME")}${Deno.build.os === "windows" ? "\\" : "/"}projects`;
-}
+import { getProjectsDir } from "./sync.ts";
 
 export interface ProjectHandlerDeps {
   getWorkDir: () => string;
   setWorkDir: (dir: string) => void;
+  /** Optional: bot instance for resyncChannels. Injected after bot creation. */
+  // deno-lint-ignore no-explicit-any
+  getBot?: () => any;
 }
 
 export function createProjectHandler(deps: ProjectHandlerDeps) {
@@ -78,6 +76,58 @@ export function createProjectHandler(deps: ProjectHandlerDeps) {
         default:
           return { content: `Unknown action: ${action}` };
       }
+    },
+
+    // deno-lint-ignore no-explicit-any
+    async onSync(_ctx: any, maxAge?: number) {
+      const bot = deps.getBot?.();
+      if (!bot?.resyncChannels) {
+        return {
+          embeds: [{
+            color: 0xff4444,
+            title: 'Sync Error',
+            description: 'Bot sync not available. Try again after startup.',
+          }]
+        };
+      }
+
+      const result = await bot.resyncChannels(maxAge ?? 30);
+      const fields: { name: string; value: string; inline?: boolean }[] = [];
+
+      if (result.created.length > 0) {
+        fields.push({
+          name: `Created (${result.created.length})`,
+          value: result.created.map((c: string) => `#${c}`).join(', '),
+          inline: false,
+        });
+      }
+
+      fields.push({
+        name: `Existing (${result.existing.length})`,
+        value: result.existing.length > 0
+          ? result.existing.slice(0, 20).map((c: string) => `#${c}`).join(', ') +
+            (result.existing.length > 20 ? ` ... +${result.existing.length - 20} more` : '')
+          : 'None',
+        inline: false,
+      });
+
+      if (result.stale.length > 0) {
+        fields.push({
+          name: `Stale (${result.stale.length})`,
+          value: result.stale.map((c: string) => `#${c}`).join(', '),
+          inline: false,
+        });
+      }
+
+      return {
+        embeds: [{
+          color: 0x00ff00,
+          title: 'Channel Sync Complete',
+          description: `Scanned projects with commits in last ${maxAge ?? 30} days`,
+          fields,
+          timestamp: true,
+        }]
+      };
     },
 
     async autocompleteProjectName(typed: string): Promise<{ name: string; value: string }[]> {

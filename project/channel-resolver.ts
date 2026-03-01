@@ -1,11 +1,5 @@
 import { sanitizeChannelName } from "../discord/utils.ts";
-
-/** Derive PROJECTS_DIR from environment — lazy to avoid reading env before .env is loaded */
-function getProjectsDir(): string {
-  return Deno.env.get("PROJECTS_DIR")
-    || Deno.env.get("WORK_DIR")
-    || `${Deno.env.get("USERPROFILE") || Deno.env.get("HOME")}${Deno.build.os === "windows" ? "\\" : "/"}projects`;
-}
+import { getProjectsDir, getBotProjectDir } from "./sync.ts";
 
 /** Strip everything except alphanumeric chars for fuzzy comparison */
 function normalize(s: string): string {
@@ -16,6 +10,7 @@ function normalize(s: string): string {
  * Resolve a Discord channel name to a project directory.
  *
  * Scans getProjectsDir() and uses multi-phase matching:
+ *   0. Special channels: "general" → projects root, "discord-bot" → bot source dir
  *   1. Exact match: sanitized folder name === channel name
  *   2. Normalized prefix: channel (stripped) starts with folder (stripped)
  *      → takes the LONGEST match to avoid ambiguity
@@ -25,6 +20,14 @@ function normalize(s: string): string {
  * - If no match → returns currentWorkDir (logs a warning)
  */
 export function resolveChannelToProject(channelName: string, currentWorkDir: string): string {
+  // Special channels
+  if (channelName === "general") {
+    return getProjectsDir();
+  }
+  if (channelName === "discord-bot") {
+    return getBotProjectDir();
+  }
+
   // "main" channel always keeps the current project
   if (channelName === "main") {
     return currentWorkDir;

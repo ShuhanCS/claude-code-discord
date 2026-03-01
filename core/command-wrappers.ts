@@ -573,6 +573,25 @@ function createProjectCommandHandlers(
         }
       }
     }],
+    ['sync', {
+      execute: async (ctx: InteractionContext) => {
+        await ctx.deferReply();
+        const maxAge = ctx.getInteger('max-age');
+        try {
+          // deno-lint-ignore no-explicit-any
+          const result: any = await projectHandler.onSync(ctx, maxAge ?? undefined);
+          if (result.embeds) {
+            await ctx.editReply({ embeds: result.embeds });
+          } else if (result.content) {
+            await ctx.editReply({ content: result.content });
+          }
+        } catch (error) {
+          const errorFormatted = formatError(error instanceof Error ? error : new Error(String(error)), 'sync');
+          const { embed } = createFormattedEmbed('Error', errorFormatted.formatted, 0xff0000);
+          await ctx.editReply({ embeds: [embed] });
+        }
+      }
+    }],
   ]);
 }
 

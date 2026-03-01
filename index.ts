@@ -33,7 +33,7 @@ import { systemCommands } from "./system/index.ts";
 import { helpCommand } from "./help/index.ts";
 import { agentCommand } from "./agent/index.ts";
 import { cleanupPaginationStates } from "./discord/index.ts";
-import { resolveChannelToProject } from "./project/index.ts";
+import { resolveChannelToProject, loadProjectContext, buildContextEmbed } from "./project/index.ts";
 import { runVersionCheck, startPeriodicUpdateCheck, BOT_VERSION } from "./util/version-check.ts";
 
 // Core modules - now handle most of the heavy lifting
@@ -182,6 +182,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
           bot.updateBotSettings(settings);
         }
       },
+      getBot: () => bot,
     },
     {
       getController: () => claudeController,
@@ -240,6 +241,36 @@ export async function createClaudeCodeBot(config: BotConfig) {
       if (resolved !== workDir) {
         console.log(`[channel-router] Switched to project: ${resolved} (channel: #${channelName})`);
         workDir = resolved;
+      }
+    },
+    onChannelActivated: async (channelName: string, channelId: string) => {
+      // Send context greeting embed on first interaction per channel per session
+      try {
+        const projectDir = resolveChannelToProject(channelName, workDir);
+        const ctx = await loadProjectContext(projectDir, channelName);
+        const embedData = buildContextEmbed(ctx);
+
+        // Send the embed to the specific channel
+        if (bot) {
+          const { EmbedBuilder } = await import("npm:discord.js@14.14.1");
+          const guild = bot.client.guilds.cache.first();
+          if (guild) {
+            const ch = guild.channels.cache.get(channelId) || await guild.channels.fetch(channelId).catch(() => null);
+            if (ch && 'send' in ch) {
+              const embed = new EmbedBuilder();
+              if (embedData.color !== undefined) embed.setColor(embedData.color);
+              if (embedData.title) embed.setTitle(embedData.title);
+              if (embedData.description) embed.setDescription(embedData.description);
+              if (embedData.fields) embedData.fields.forEach(f => embed.addFields(f));
+              if (embedData.footer) embed.setFooter(embedData.footer);
+              if (embedData.timestamp) embed.setTimestamp();
+              // deno-lint-ignore no-explicit-any
+              await (ch as any).send({ embeds: [embed] });
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`[context-greeting] Failed for #${channelName}:`, err);
       }
     },
   };

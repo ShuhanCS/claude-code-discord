@@ -20,11 +20,12 @@ import { handlePaginationInteraction } from "./pagination.ts";
 import { checkCommandPermission } from "../core/rbac.ts";
 import { SETTINGS_ACTIONS, SETTINGS_VALUES } from "../settings/unified-settings.ts";
 import { BOT_VERSION } from "../util/version-check.ts";
-import type { 
-  BotConfig, 
-  CommandHandlers, 
+import { scanActiveProjects, syncChannelsToProjects, getProjectsDir, type SyncResult } from "../project/sync.ts";
+import type {
+  BotConfig,
+  CommandHandlers,
   ButtonHandlers,
-  MessageContent, 
+  MessageContent,
   InteractionContext,
   BotDependencies
 } from "./types.ts";
@@ -122,18 +123,22 @@ export async function createDiscordBot(
   // Use commands from dependencies
   const commands = dependencies.commands;
   
-  // Channel management
+  // Channel activation tracking — session-scoped set of channel IDs.
+  // When a channel is first interacted with, the context greeting is shown.
+  const activatedChannels = new Set<string>();
+
+  // Channel management — ensures category exists and syncs all project channels
   // deno-lint-ignore no-explicit-any
-  async function ensureChannelExists(guild: any): Promise<TextChannel> {
+  async function ensureAllChannelsExist(guild: any, maxAgeDays = 30): Promise<{ channel: TextChannel; syncResult: SyncResult }> {
     const channelName = sanitizeChannelName(branchName);
-    
+
     console.log(`Checking category "${actualCategoryName}"...`);
-    
+
     let category = guild.channels.cache.find(
       // deno-lint-ignore no-explicit-any
       (c: any) => c.type === ChannelType.GuildCategory && c.name === actualCategoryName
     );
-    
+
     if (!category) {
       console.log(`Creating category "${actualCategoryName}"...`);
       try {
@@ -147,16 +152,37 @@ export async function createDiscordBot(
         throw new Error(`Cannot create category. Please ensure the bot has "Manage Channels" permission.`);
       }
     }
-    
+
     myCategory = category;
     myCategoryId = category.id;
-    
+
+    // Scan active projects and sync channels
+    console.log(`[sync] Scanning projects in ${getProjectsDir()} (max age: ${maxAgeDays} days)...`);
+    const projects = await scanActiveProjects(getProjectsDir(), maxAgeDays);
+    console.log(`[sync] Found ${projects.length} active projects`);
+
+    const syncResult = await syncChannelsToProjects(guild, category.id, projects);
+    console.log(`[sync] Created: ${syncResult.created.length}, Existing: ${syncResult.existing.length}, Stale: ${syncResult.stale.length}`);
+    if (syncResult.stale.length > 0) {
+      console.log(`[sync] Stale channels (no matching project): ${syncResult.stale.join(', ')}`);
+    }
+
+    // Find the primary channel (current branch channel, or #general as fallback)
     let channel = guild.channels.cache.find(
       // deno-lint-ignore no-explicit-any
       (c: any) => c.type === ChannelType.GuildText && c.name === channelName && c.parentId === category.id
     );
-    
+
     if (!channel) {
+      // Fallback to #general
+      channel = guild.channels.cache.find(
+        // deno-lint-ignore no-explicit-any
+        (c: any) => c.type === ChannelType.GuildText && c.name === 'general' && c.parentId === category.id
+      );
+    }
+
+    if (!channel) {
+      // Last resort: create the branch channel
       console.log(`Creating channel "${channelName}"...`);
       try {
         channel = await guild.channels.create({
@@ -171,8 +197,8 @@ export async function createDiscordBot(
         throw new Error(`Cannot create channel. Please ensure the bot has "Manage Channels" permission.`);
       }
     }
-    
-    return channel as TextChannel;
+
+    return { channel: channel as TextChannel, syncResult };
   }
   
   // Create interaction context wrapper
@@ -269,12 +295,14 @@ export async function createDiscordBot(
     return ch.parentId === myCategoryId;
   }
 
-  // Notify the caller when the interaction comes from a non-default channel
+  // Notify the caller when the interaction comes from a non-default channel.
+  // Also fires onChannelActivated on first interaction per channel per session.
   async function notifyChannelSwitch(interaction: CommandInteraction | ButtonInteraction): Promise<void> {
-    if (!myChannel || !dependencies.onChannelSwitch) return;
-    if (interaction.channelId === myChannel.id) return;
     const guild = client.guilds.cache.first();
     if (!guild) return;
+
+    // Resolve the channel name
+    let channelName: string | null = null;
     let ch = guild.channels.cache.get(interaction.channelId);
     if (!ch) {
       try {
@@ -283,7 +311,23 @@ export async function createDiscordBot(
       } catch { /* cache miss + fetch fail — skip */ }
     }
     if (ch && 'name' in ch && typeof ch.name === 'string') {
-      dependencies.onChannelSwitch(ch.name);
+      channelName = ch.name;
+    }
+
+    // Notify channel switch (project directory resolution)
+    if (myChannel && dependencies.onChannelSwitch && interaction.channelId !== myChannel.id && channelName) {
+      dependencies.onChannelSwitch(channelName);
+    }
+
+    // Activation tracking — fire onChannelActivated once per channel per session
+    if (channelName && !activatedChannels.has(interaction.channelId)) {
+      activatedChannels.add(interaction.channelId);
+      if (dependencies.onChannelActivated) {
+        // Fire-and-forget — don't block command execution
+        dependencies.onChannelActivated(channelName, interaction.channelId).catch((err) => {
+          console.error(`[context-greeting] Error for #${channelName}:`, err);
+        });
+      }
     }
   }
 
@@ -595,9 +639,18 @@ export async function createDiscordBot(
     }
     
     try {
-      myChannel = await ensureChannelExists(guild);
+      const { channel, syncResult } = await ensureAllChannelsExist(guild);
+      myChannel = channel;
       console.log(`Using channel "${myChannel.name}" (category ID: ${myCategoryId})`);
-      
+
+      // Mark primary channel as activated
+      activatedChannels.add(myChannel.id);
+
+      const totalSynced = syncResult.created.length + syncResult.existing.length;
+      const syncSummary = syncResult.created.length > 0
+        ? `Synced ${totalSynced} channels (${syncResult.created.length} new)`
+        : `Synced ${totalSynced} channels`;
+
       await myChannel.send(convertMessageContent({
         embeds: [{
           color: 0x00ff00,
@@ -607,6 +660,7 @@ export async function createDiscordBot(
             { name: 'Category', value: actualCategoryName, inline: true },
             { name: 'Repository', value: repoName, inline: true },
             { name: 'Branch', value: branchName, inline: true },
+            { name: 'Channels', value: syncSummary, inline: true },
             { name: 'Working Directory', value: `\`${workDir}\``, inline: false }
           ],
           timestamp: true
@@ -621,6 +675,13 @@ export async function createDiscordBot(
           ]
         }]
       }));
+
+      // Send context greeting for the primary channel
+      if (dependencies.onChannelActivated && myChannel.name) {
+        dependencies.onChannelActivated(myChannel.name, myChannel.id).catch((err) => {
+          console.error(`[context-greeting] Error for startup channel:`, err);
+        });
+      }
     } catch (error) {
       console.error('Channel creation/retrieval error:', error);
     }
@@ -663,6 +724,15 @@ export async function createDiscordBot(
     },
     getBotSettings() {
       return { ...botSettings };
-    }
+    },
+    /** Re-scan projects and sync channels. Returns SyncResult. */
+    async resyncChannels(maxAgeDays = 30): Promise<SyncResult> {
+      const guild = client.guilds.cache.first();
+      if (!guild || !myCategoryId) {
+        return { created: [], existing: [], stale: [] };
+      }
+      const projects = await scanActiveProjects(getProjectsDir(), maxAgeDays);
+      return await syncChannelsToProjects(guild, myCategoryId, projects);
+    },
   };
 }

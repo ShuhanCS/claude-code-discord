@@ -19,3 +19,11 @@ export const projectCommands = [
         .setRequired(false)
         .setAutocomplete(true)),
 ];
+
+export const syncCommand = new SlashCommandBuilder()
+  .setName('sync')
+  .setDescription('Re-scan projects and sync Discord channels')
+  .addIntegerOption(option =>
+    option.setName('max-age')
+      .setDescription('Max days since last commit (default: 30)')
+      .setRequired(false));

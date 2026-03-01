@@ -27,7 +27,7 @@ import { helpCommand, createHelpHandlers } from "../help/index.ts";
 import { agentCommand, createAgentHandlers } from "../agent/index.ts";
 import { screenshotCommands, createScreenshotHandlers } from "../screenshot/index.ts";
 import { infoCommands, createInfoCommandHandlers } from "../claude/index.ts";
-import { projectCommands, createProjectHandler } from "../project/index.ts";
+import { projectCommands, syncCommand, createProjectHandler } from "../project/index.ts";
 import { cleanSessionId, ClaudeSessionManager } from "../claude/index.ts";
 import type { ClaudeModelOptions } from "../claude/index.ts";
 import type { AskUserCallback } from "../claude/index.ts";
@@ -183,6 +183,10 @@ export interface HandlerRegistryDeps {
   /** Late-bound callback for interactive permission requests — replaces auto-deny.
    *  Shows Allow/Deny buttons in Discord when Claude wants to use an unapproved tool. */
   onPermissionRequest?: PermissionRequestCallback;
+  /** Late-bound bot instance getter — set after bot is created.
+   *  Used by project handler for resyncChannels(). */
+  // deno-lint-ignore no-explicit-any
+  getBot?: () => any;
 }
 
 /**
@@ -621,6 +625,7 @@ export function createAllHandlers(
   const projectHandler = createProjectHandler({
     getWorkDir,
     setWorkDir: deps.setWorkDir ?? ((dir: string) => { deps.workDir = dir; }),
+    getBot: deps.getBot,
   });
 
   return {
@@ -661,6 +666,7 @@ export function getAllCommands() {
     ...screenshotCommands,
     ...infoCommands,
     ...projectCommands,
+    syncCommand,
     helpCommand,
   ];
 }

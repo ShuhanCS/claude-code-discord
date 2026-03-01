@@ -108,4 +108,7 @@ export interface BotDependencies {
   /** Called when an interaction arrives from a channel other than the default.
    *  Receives the channel name so the caller can resolve it to a project directory. */
   onChannelSwitch?: (channelName: string) => void;
+  /** Called the first time a channel is interacted with per session.
+   *  Used to send a context greeting embed. */
+  onChannelActivated?: (channelName: string, channelId: string) => Promise<void>;
 }

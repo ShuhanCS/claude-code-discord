@@ -111,10 +111,10 @@ export function createProjectHandler(deps: ProjectHandlerDeps) {
         inline: false,
       });
 
-      if (result.stale.length > 0) {
+      if (result.deleted.length > 0) {
         fields.push({
-          name: `Stale (${result.stale.length})`,
-          value: result.stale.map((c: string) => `#${c}`).join(', '),
+          name: `Deleted (${result.deleted.length})`,
+          value: result.deleted.map((c: string) => `#${c}`).join(', '),
           inline: false,
         });
       }

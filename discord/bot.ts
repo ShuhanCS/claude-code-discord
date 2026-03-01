@@ -162,9 +162,9 @@ export async function createDiscordBot(
     console.log(`[sync] Found ${projects.length} active projects`);
 
     const syncResult = await syncChannelsToProjects(guild, category.id, projects);
-    console.log(`[sync] Created: ${syncResult.created.length}, Existing: ${syncResult.existing.length}, Stale: ${syncResult.stale.length}`);
-    if (syncResult.stale.length > 0) {
-      console.log(`[sync] Stale channels (no matching project): ${syncResult.stale.join(', ')}`);
+    console.log(`[sync] Created: ${syncResult.created.length}, Existing: ${syncResult.existing.length}, Deleted: ${syncResult.deleted.length}`);
+    if (syncResult.deleted.length > 0) {
+      console.log(`[sync] Deleted stale channels: ${syncResult.deleted.join(', ')}`);
     }
 
     // Find the primary channel (current branch channel, or #general as fallback)
@@ -647,9 +647,10 @@ export async function createDiscordBot(
       activatedChannels.add(myChannel.id);
 
       const totalSynced = syncResult.created.length + syncResult.existing.length;
+      const deletedNote = syncResult.deleted.length > 0 ? `, ${syncResult.deleted.length} removed` : '';
       const syncSummary = syncResult.created.length > 0
-        ? `Synced ${totalSynced} channels (${syncResult.created.length} new)`
-        : `Synced ${totalSynced} channels`;
+        ? `Synced ${totalSynced} channels (${syncResult.created.length} new${deletedNote})`
+        : `Synced ${totalSynced} channels${deletedNote}`;
 
       await myChannel.send(convertMessageContent({
         embeds: [{
@@ -729,7 +730,7 @@ export async function createDiscordBot(
     async resyncChannels(maxAgeDays = 7): Promise<SyncResult> {
       const guild = client.guilds.cache.first();
       if (!guild || !myCategoryId) {
-        return { created: [], existing: [], stale: [] };
+        return { created: [], existing: [], deleted: [] };
       }
       const projects = await scanActiveProjects(getProjectsDir(), maxAgeDays);
       return await syncChannelsToProjects(guild, myCategoryId, projects);

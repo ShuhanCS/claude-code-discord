@@ -32,8 +32,8 @@ export interface SyncResult {
   created: string[];
   /** Channels that already existed */
   existing: string[];
-  /** Channels with no matching project (report only, never delete) */
-  stale: string[];
+  /** Channels with no matching project that were deleted to free slots */
+  deleted: string[];
 }
 
 // ================================
@@ -213,15 +213,15 @@ const DISCORD_CATEGORY_CHANNEL_LIMIT = 50;
 /**
  * Sync Discord channels to match active projects.
  *
- * Creates special channels first (#general, #discord-bot), then fills
- * remaining slots with the most recently active projects. Respects
- * Discord's 50-channel-per-category limit. Reports stale channels
- * (channels with no matching project) but never deletes them.
+ * 1. Deletes stale channels (no matching active project or special channel) to free slots
+ * 2. Creates special channels first (#general, #discord-bot)
+ * 3. Fills remaining slots with the most recently active projects
+ * Respects Discord's 50-channel-per-category limit.
  *
  * @param guild - Discord.js Guild object
  * @param categoryId - ID of the bot's category
  * @param projects - Active projects from scanActiveProjects() (already sorted by recency)
- * @returns SyncResult with created/existing/stale channel names
+ * @returns SyncResult with created/existing/deleted channel names
  */
 // deno-lint-ignore no-explicit-any
 export async function syncChannelsToProjects(
@@ -231,7 +231,7 @@ export async function syncChannelsToProjects(
 ): Promise<SyncResult> {
   const created: string[] = [];
   const existing: string[] = [];
-  const stale: string[] = [];
+  const deleted: string[] = [];
 
   // Build set of desired channel names (projects + special)
   const desiredNames = new Set<string>();
@@ -250,12 +250,30 @@ export async function syncChannelsToProjects(
 
   const existingNames = new Set<string>();
   // deno-lint-ignore no-explicit-any
+  const existingChannelMap = new Map<string, any>();
+  // deno-lint-ignore no-explicit-any
   existingChannels.forEach((ch: any) => {
     existingNames.add(ch.name);
+    existingChannelMap.set(ch.name, ch);
   });
 
   // Track current channel count in category
   let channelCount = existingNames.size;
+
+  // 0. DELETE stale channels — free slots for wanted channels
+  for (const [name, ch] of existingChannelMap) {
+    if (!desiredNames.has(name)) {
+      try {
+        await ch.delete(`[sync] Stale channel — no active project match`);
+        deleted.push(name);
+        channelCount--;
+        existingNames.delete(name);
+        console.log(`[sync] Deleted stale channel #${name}`);
+      } catch (err) {
+        console.error(`[sync] Failed to delete stale channel #${name}: ${err}`);
+      }
+    }
+  }
 
   // 1. Special channels FIRST — guaranteed slots
   for (const special of SPECIAL_CHANNELS) {
@@ -315,12 +333,5 @@ export async function syncChannelsToProjects(
     }
   }
 
-  // Find stale channels (exist in Discord but no matching project or special)
-  for (const name of existingNames) {
-    if (!desiredNames.has(name)) {
-      stale.push(name);
-    }
-  }
-
-  return { created, existing, stale };
+  return { created, existing, deleted };
 }

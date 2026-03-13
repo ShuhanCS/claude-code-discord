@@ -320,6 +320,14 @@ export interface ModelInfo {
   aliasFor?: string;
   thinkingMode?: boolean;
   deprecated?: boolean;
+  /** Whether this model supports effort levels (SDK v0.2.74+) */
+  supportsEffort?: boolean;
+  /** Available effort levels for this model */
+  supportedEffortLevels?: ('low' | 'medium' | 'high' | 'max')[];
+  /** Whether this model supports adaptive thinking */
+  supportsAdaptiveThinking?: boolean;
+  /** Whether this model supports fast mode */
+  supportsFastMode?: boolean;
 }
 
 // Claude Code model options - Dynamic-friendly with aliases
@@ -450,16 +458,18 @@ export function resolveModelId(modelInput: string): string {
   return modelInput;
 }
 
-// Check if a model string is valid (known or custom)
-// Always returns true for custom model strings — let the CLI validate them
+// Check if a model string is valid (known or likely valid)
 export function isValidModel(modelInput: string): boolean {
+  if (!modelInput || modelInput.trim().length === 0) return false;
   // Known models are always valid
   if (modelInput in CLAUDE_MODELS) return true;
   // Accept any string that looks like a Claude model ID
   if (modelInput.startsWith('claude-')) return true;
   // Accept known alias patterns
   if (['opus', 'sonnet', 'haiku'].includes(modelInput.toLowerCase())) return true;
-  // Accept any custom string — the CLI will validate
+  // Reject strings that are clearly not model identifiers
+  if (modelInput.includes(' ') || modelInput.length < 3) return false;
+  // Accept other plausible model IDs — the CLI will validate
   return true;
 }
 
@@ -501,12 +511,24 @@ export function updateModelsFromSDK(sdkModels: SDKModelInfo[]): void {
     const id = sdkModel.value;
     if (!id) continue;
 
-    // Update existing entry with SDK display name/description
+    // deno-lint-ignore no-explicit-any
+    const sdk = sdkModel as any; // SDK v0.2.74 has extra fields not in older types
+
+    // Merge SDK capability flags
+    const capabilityFields = {
+      supportsEffort: sdk.supportsEffort ?? undefined,
+      supportedEffortLevels: sdk.supportedEffortLevels ?? undefined,
+      supportsAdaptiveThinking: sdk.supportsAdaptiveThinking ?? undefined,
+      supportsFastMode: sdk.supportsFastMode ?? undefined,
+    };
+
+    // Update existing entry with SDK display name/description + capabilities
     if (CLAUDE_MODELS[id]) {
       CLAUDE_MODELS[id].name = sdkModel.displayName || CLAUDE_MODELS[id].name;
       if (sdkModel.description) {
         CLAUDE_MODELS[id].description = sdkModel.description;
       }
+      Object.assign(CLAUDE_MODELS[id], capabilityFields);
       updated++;
     } else {
       // Add new model discovered via SDK
@@ -523,6 +545,7 @@ export function updateModelsFromSDK(sdkModels: SDKModelInfo[]): void {
         supportsThinking: id.includes('opus') || (id.includes('sonnet') && !id.startsWith('claude-3-5-')),
         tier,
         deprecated: id.startsWith('claude-3-') && !id.startsWith('claude-3-5-'),
+        ...capabilityFields,
       };
       updated++;
     }

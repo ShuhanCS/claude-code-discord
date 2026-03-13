@@ -821,7 +821,7 @@ export const COMMAND_HELP = {
       "Requires an active Claude session to control",
       "Interrupt stops the current processing immediately",
       "Set-model switches the model mid-conversation",
-      "Set-permissions changes the permission mode (plan, autoEdit, fullAuto, delegate, bypassPermissions)",
+      "Set-permissions changes the permission mode (plan, acceptEdits, dontAsk, bypassPermissions)",
       "In 'default' or 'acceptEdits' mode, unapproved tools trigger interactive Allow/Deny buttons in Discord",
       "Stop-task halts a running background task by its ID",
       "Status shows active session info"

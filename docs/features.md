@@ -19,7 +19,6 @@ Set via `/settings` > `claude` > `set-thinking`.
 | Trusted | `bypassPermissions` | Full auto-approval of all operations |
 | Safe | `plan` | Analyze only, no modifications |
 | Don't Ask | `dontAsk` | Auto-denies any tool that isn't pre-approved |
-| Delegate | `delegate` | Restricts to Teammate + Task tools only (agent teams) |
 
 Set via `/settings` > `permissions` > `set-mode`.
 
@@ -43,7 +42,7 @@ Set via `/settings` > `claude` > `set-effort`.
 | 1M Token Context | Beta: increases context window to 1M tokens |
 | Sandbox Mode | Granular sandbox with network rules, filesystem ACLs, excluded commands |
 | File Checkpointing | Enables file change tracking for rewind support |
-| Agent Teams | Experimental multi-agent collaboration (delegate mode) |
+| Agent Teams | Experimental multi-agent collaboration |
 | Hooks System | Passive SDK callbacks for tool use, notification, and task observability |
 | Additional Directories | Multi-repo access — let Claude read/write across multiple directories |
 | Fork Session | Branch a conversation into a new independent session |

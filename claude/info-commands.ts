@@ -155,7 +155,16 @@ export function createInfoCommandHandlers(deps: InfoCommandHandlerDeps) {
             models = info?.models;
           }
           if (models && models.length > 0) {
-            const modelList = models.map(m => `• **${m.value}** — ${m.displayName}\n  ${m.description}`).join('\n');
+            const modelList = models.map(m => {
+              // deno-lint-ignore no-explicit-any
+              const sdk = m as any;
+              const flags: string[] = [];
+              if (sdk.supportsEffort) flags.push('effort');
+              if (sdk.supportsAdaptiveThinking) flags.push('adaptive');
+              if (sdk.supportsFastMode) flags.push('fast');
+              const flagStr = flags.length > 0 ? ` [${flags.join(', ')}]` : '';
+              return `• **${m.value}** — ${m.displayName}${flagStr}\n  ${m.description}`;
+            }).join('\n');
             // Split if too long for Discord (max 4096 chars)
             const chunks = splitText(modelList, 4000);
             await ctx.editReply({
@@ -387,7 +396,7 @@ export function createInfoCommandHandlers(deps: InfoCommandHandlerDeps) {
         }
 
         case 'set-permissions': {
-          const validModes = ['default', 'plan', 'acceptEdits', 'bypassPermissions', 'delegate', 'dontAsk'];
+          const validModes = ['default', 'plan', 'acceptEdits', 'bypassPermissions', 'dontAsk'];
           if (!value || !validModes.includes(value)) {
             await ctx.editReply({
               content: `Invalid permission mode. Available: ${validModes.join(', ')}`,

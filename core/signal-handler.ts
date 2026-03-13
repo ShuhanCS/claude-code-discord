@@ -26,6 +26,9 @@ export interface CleanupContext {
  */
 export type ShutdownSignal = 'SIGINT' | 'SIGTERM' | 'SIGBREAK';
 
+/** Stored handler references for removal. */
+const registeredHandlers = new Map<string, () => void>();
+
 /**
  * Configuration for signal handler setup.
  */
@@ -164,59 +167,48 @@ export function setupSignalHandlers(
   // Create the shutdown handler
   const handleSignal = createShutdownHandler(ctx, config);
   
-  // SIGINT (Ctrl+C) - works on all platforms
-  const sigintResult = tryRegisterSignal('SIGINT', () => handleSignal('SIGINT'));
-  if (sigintResult.success) {
-    result.registeredSignals.push('SIGINT');
-  } else {
-    result.failedSignals.push({ signal: 'SIGINT', error: sigintResult.error });
-    if (verbose) {
-      console.warn('Could not register SIGINT handler:', sigintResult.error);
+  // Helper to register and track a signal handler
+  const registerSignal = (signal: ShutdownSignal, denoSignal: Deno.Signal) => {
+    const handler = () => handleSignal(signal);
+    const registerResult = tryRegisterSignal(denoSignal, handler);
+    if (registerResult.success) {
+      result.registeredSignals.push(signal);
+      registeredHandlers.set(signal, handler);
+    } else {
+      result.failedSignals.push({ signal, error: registerResult.error });
+      if (verbose) {
+        console.warn(`Could not register ${signal} handler:`, registerResult.error);
+      }
     }
-  }
-  
+  };
+
+  // SIGINT (Ctrl+C) - works on all platforms
+  registerSignal('SIGINT', 'SIGINT');
+
   // Platform-specific signals
   if (platform === 'windows') {
-    // Windows-specific: SIGBREAK (Ctrl+Break)
-    const sigbreakResult = tryRegisterSignal('SIGBREAK', () => handleSignal('SIGBREAK'));
-    if (sigbreakResult.success) {
-      result.registeredSignals.push('SIGBREAK');
-    } else {
-      result.failedSignals.push({ signal: 'SIGBREAK', error: sigbreakResult.error });
-      if (verbose) {
-        console.warn('Could not register SIGBREAK handler:', sigbreakResult.error);
-      }
-    }
+    registerSignal('SIGBREAK', 'SIGBREAK');
   } else {
-    // Unix-like systems: SIGTERM
-    const sigtermResult = tryRegisterSignal('SIGTERM', () => handleSignal('SIGTERM'));
-    if (sigtermResult.success) {
-      result.registeredSignals.push('SIGTERM');
-    } else {
-      result.failedSignals.push({ signal: 'SIGTERM', error: sigtermResult.error });
-      if (verbose) {
-        console.warn('Could not register SIGTERM handler:', sigtermResult.error);
-      }
-    }
+    registerSignal('SIGTERM', 'SIGTERM');
   }
   
   return result;
 }
 
 /**
- * Remove all registered signal handlers.
- * Useful for cleanup in tests or when restarting signal handling.
- * 
+ * Remove registered signal handlers.
+ *
  * @param signals - Array of signals to remove handlers for
  */
 export function removeSignalHandlers(signals: ShutdownSignal[]): void {
   for (const signal of signals) {
+    const handler = registeredHandlers.get(signal);
+    if (!handler) continue;
     try {
-      // Note: Deno doesn't have removeSignalListener, so we track handlers externally
-      // This is a placeholder for future implementation if needed
-      console.log(`Signal handler for ${signal} would be removed (not yet supported by Deno)`);
+      Deno.removeSignalListener(signal as Deno.Signal, handler);
+      registeredHandlers.delete(signal);
     } catch {
-      // Ignore errors when removing handlers
+      // Ignore errors when removing handlers (e.g. signal not supported on platform)
     }
   }
 }

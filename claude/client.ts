@@ -72,9 +72,9 @@ export function cleanSessionId(sessionId: string): string {
 }
 
 // Valid SDK permission modes (maps to CLI --permission-mode)
-// New SDK (claude-agent-sdk) supports 6 modes:
-//   default, acceptEdits, bypassPermissions, plan, delegate, dontAsk
-export type SDKPermissionMode = 'default' | 'plan' | 'acceptEdits' | 'bypassPermissions' | 'delegate' | 'dontAsk';
+// SDK v0.2.74 supports 5 modes:
+//   default, acceptEdits, bypassPermissions, plan, dontAsk
+export type SDKPermissionMode = 'default' | 'plan' | 'acceptEdits' | 'bypassPermissions' | 'dontAsk';
 
 // Thinking configuration — native SDK option (replaces MAX_THINKING_TOKENS env var hack)
 export type ThinkingConfig =
@@ -265,7 +265,7 @@ export async function sendToClaudeCode(
           //   3. Everything else → deny (dontAsk mode blocks unapproved tools)
           // NOTE: The SDK's runtime Zod schema requires `updatedInput` on allow responses
           // even though the TypeScript types mark it optional — pass through original input.
-          canUseTool: async (toolName: string, input: Record<string, unknown>) => {
+          canUseTool: async (toolName: string, input: Record<string, unknown>, _options: { signal: AbortSignal; suggestions?: unknown[]; blockedPath?: string; decisionReason?: string; toolUseID: string; agentID?: string }) => {
             // Standard Claude Code tools — auto-allow when permission mode allows edits
             const STANDARD_TOOLS = new Set([
               'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep',

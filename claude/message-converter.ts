@@ -170,7 +170,56 @@ export function convertToClaudeMessages(jsonData: any): ClaudeMessage[] {
         toolUseIds: jsonData.preceding_tool_use_ids,
       }
     });
+  } else if (jsonData.type === 'rate_limit_event') {
+    // Rate limit events (SDK v0.2.74+)
+    const info = jsonData.rate_limit_info || {};
+    const statusLabel = info.status === 'rejected' ? 'RATE LIMITED'
+      : info.status === 'allowed_warning' ? 'Rate limit warning'
+      : 'OK';
+    messages.push({
+      type: 'rate_limit',
+      content: statusLabel,
+      metadata: {
+        status: info.status,
+        resetsAt: info.resetsAt,
+        rateLimitType: info.rateLimitType,
+        utilization: info.utilization,
+        isUsingOverage: info.isUsingOverage,
+      }
+    });
+  } else if (jsonData.type === 'prompt_suggestion') {
+    // Predicted next user prompt (SDK v0.2.74+)
+    messages.push({
+      type: 'prompt_suggestion',
+      content: jsonData.suggestion || '',
+      metadata: { suggestion: jsonData.suggestion }
+    });
+  } else if (jsonData.type === 'auth_status') {
+    // Authentication status (SDK v0.2.74+)
+    if (jsonData.error) {
+      messages.push({
+        type: 'auth_status',
+        content: `Auth error: ${jsonData.error}`,
+        metadata: {
+          isAuthenticating: jsonData.isAuthenticating,
+          error: jsonData.error,
+          output: jsonData.output,
+        }
+      });
+    }
+  } else if (jsonData.type === 'stream_event') {
+    // Partial streaming events — skip (handled by onChunk in client.ts)
+  } else if (jsonData.type === 'task_progress') {
+    // Subagent progress summaries (SDK v0.2.74+)
+    messages.push({
+      type: 'task_progress',
+      content: jsonData.summary || '',
+      metadata: {
+        taskId: jsonData.task_id,
+        summary: jsonData.summary,
+      }
+    });
   }
-  
+
   return messages;
 }

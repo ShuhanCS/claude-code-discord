@@ -17,7 +17,8 @@ export interface PermissionDenial {
 
 export interface ClaudeMessage {
   type: 'text' | 'tool_use' | 'tool_result' | 'thinking' | 'system' | 'other'
-    | 'permission_denied' | 'task_notification' | 'task_started' | 'tool_progress' | 'tool_summary';
+    | 'permission_denied' | 'task_notification' | 'task_started' | 'tool_progress' | 'tool_summary'
+    | 'rate_limit' | 'prompt_suggestion' | 'auth_status' | 'hook_event' | 'task_progress';
   content: string;
   // deno-lint-ignore no-explicit-any
   metadata?: any;

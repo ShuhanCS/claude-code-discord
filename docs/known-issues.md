@@ -1,6 +1,6 @@
 # Known Issues & Accepted Risks
 
-> Last audited: 2025-02-18  
+> Last audited: 2026-03-12
 > Context: Single-user personal Discord bot — not a production multi-user service
 
 This document tracks issues identified during a comprehensive code audit that were **intentionally not fixed**. Each entry explains why the issue exists, why it doesn't matter for our use case, and under what conditions (if any) it would need revisiting.
@@ -83,17 +83,13 @@ This document tracks issues identified during a comprehensive code audit that we
 
 **Why we keep it:** If you're not behind a proxy, this code is never invoked. It's dead code that doesn't hurt anything. If proxy support is needed in the future, the scaffolding is there to build on.
 
-### `removeSignalHandlers` Is a No-Op (Audit #23)
+### ~~`removeSignalHandlers` Is a No-Op (Audit #23)~~ — FIXED in v2.5.0
 
-**What:** The function to remove signal handlers doesn't actually store handler references, so it can't remove them.
+Handler references are now stored in a Map and removed via `Deno.removeSignalListener()`.
 
-**Why it doesn't matter:** Signal handlers only fire on SIGINT/SIGTERM (process shutdown). The "remove" function would only matter for hot-reload scenarios, which don't apply to this bot. On shutdown, all handlers fire and cleanup runs — the fact that you can't selectively remove them is irrelevant.
+### ~~`isValidModel` Always Returns True (Audit #16)~~ — FIXED in v2.5.0
 
-### `isValidModel` Always Returns True (Audit #16)
-
-**What:** The model validation function accepts any string as a valid model name.
-
-**Why it doesn't matter:** If you type an invalid model name, the Anthropic API returns an error. You get the same outcome (failure + error message) whether validation happens client-side or server-side. The API is the authoritative validator.
+Now rejects empty strings, whitespace, and clearly invalid identifiers while still accepting any plausible model ID for CLI validation.
 
 ### `getEnvVarPattern` Identical on Both Platforms (Audit #26)
 
@@ -172,9 +168,9 @@ This document tracks issues identified during a comprehensive code audit that we
 | Security (accepted for personal use) | 4 | No fix needed — same trust boundary |
 | Memory (self-resolving) | 3 | Bot restarts clear state |
 | Race conditions (single-user) | 2 | Can't trigger with sequential usage |
-| Dead/non-functional code | 4 | No impact, leave as-is |
+| Dead/non-functional code | 2 (was 4, 2 fixed in v2.5.0) | Proxy + getEnvVarPattern remain |
 | Fragile but functional | 6 | Works in practice, accept the tradeoff |
 | Rare edge cases | 3 | Not worth the complexity to fix |
 | **Total accepted** | **22** | |
 
-**Issues that were fixed:** #1 (stale closure), #10 (missing abort checks), #11 (pagination title), #12 (unicode splitting), #13 (continue button session ID) — see git log for details.
+**Issues that were fixed:** #1 (stale closure), #10 (missing abort checks), #11 (pagination title), #12 (unicode splitting), #13 (continue button session ID), #16 (`isValidModel` now validates), #23 (`removeSignalHandlers` now works) — see git log for details.

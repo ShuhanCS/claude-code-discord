@@ -117,7 +117,11 @@ export async function createDiscordBot(
   };
   
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds],
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent,
+    ],
   });
   
   // Use commands from dependencies
@@ -268,6 +272,18 @@ export async function createDiscordBot(
 
       getUserId(): string {
         return interaction.user?.id ?? '';
+      },
+
+      getChannelId(): string {
+        return interaction.channelId;
+      },
+
+      getChannelName(): string | null {
+        const guild = client.guilds.cache.first();
+        if (!guild) return null;
+        const ch = guild.channels.cache.get(interaction.channelId);
+        if (ch && 'name' in ch && typeof ch.name === 'string') return ch.name;
+        return null;
       }
     };
   }
@@ -697,7 +713,72 @@ export async function createDiscordBot(
       await handleButton(interaction as ButtonInteraction);
     }
   });
-  
+
+  // Plain-message listener — makes Discord feel like a Claude Code terminal.
+  // Messages in project channels (not from bots, not starting with !) are
+  // routed to Claude as conversational prompts.
+  if (dependencies.onMessage) {
+    const onMessage = dependencies.onMessage;
+    client.on(Events.MessageCreate, async (message) => {
+      // Ignore bots (including ourselves)
+      if (message.author.bot) return;
+      // Ignore DMs
+      if (!message.guild) return;
+      // Ignore empty messages (attachments-only, embeds, etc.)
+      if (!message.content || message.content.trim().length === 0) return;
+      // Escape hatch: messages starting with ! are ignored
+      if (message.content.startsWith('!')) return;
+      // Ignore slash-command-like messages (shouldn't appear, but safety check)
+      if (message.content.startsWith('/')) return;
+
+      // Must be in our category
+      if (!await isInOurCategory(message.channelId)) return;
+
+      // Skip #general — that's for notifications, not conversations
+      const channel = message.channel;
+      if ('name' in channel && channel.name === 'general') return;
+
+      // Resolve channel name
+      const channelName = 'name' in channel && typeof channel.name === 'string'
+        ? channel.name
+        : null;
+      if (!channelName) return;
+
+      // Route streaming callbacks to this channel
+      activeChannelId = message.channelId;
+
+      // Notify channel switch for workDir resolution
+      if (myChannel && message.channelId !== myChannel.id && dependencies.onChannelSwitch) {
+        dependencies.onChannelSwitch(channelName);
+      }
+
+      // First-time activation greeting
+      if (!activatedChannels.has(message.channelId)) {
+        activatedChannels.add(message.channelId);
+        if (dependencies.onChannelActivated) {
+          dependencies.onChannelActivated(channelName, message.channelId).catch((err) => {
+            console.error(`[context-greeting] Error for #${channelName}:`, err);
+          });
+        }
+      }
+
+      // Send reply helper — sends a plain text message to the channel
+      const sendReply = async (text: string) => {
+        const ch = message.channel;
+        if ('send' in ch) {
+          await ch.send(text);
+        }
+      };
+
+      try {
+        await onMessage(message.channelId, channelName, message.content, sendReply);
+      } catch (err) {
+        console.error(`[chat] Error in message handler for #${channelName}:`, err);
+        await sendReply(`**Error:** ${err instanceof Error ? err.message : String(err)}`).catch(() => {});
+      }
+    });
+  }
+
   // Login
   await client.login(discordToken);
   

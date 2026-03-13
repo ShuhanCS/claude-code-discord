@@ -48,6 +48,10 @@ export interface InteractionContext {
   getMemberRoleIds(): Set<string>;
   /** Returns the invoking member's user ID */
   getUserId(): string;
+  /** Returns the channel ID where the interaction was triggered */
+  getChannelId(): string;
+  /** Returns the channel name where the interaction was triggered (if resolvable) */
+  getChannelName(): string | null;
 }
 
 export interface BotConfig {
@@ -111,4 +115,7 @@ export interface BotDependencies {
   /** Called the first time a channel is interacted with per session.
    *  Used to send a context greeting embed. */
   onChannelActivated?: (channelName: string, channelId: string) => Promise<void>;
+  /** Called when a plain message is sent in a project channel.
+   *  Enables conversational mode — Discord feels like a Claude Code terminal. */
+  onMessage?: (channelId: string, channelName: string, content: string, sendReply: (text: string) => Promise<void>) => Promise<void>;
 }

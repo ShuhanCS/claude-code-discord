@@ -34,6 +34,7 @@ import { helpCommand } from "./help/index.ts";
 import { agentCommand } from "./agent/index.ts";
 import { cleanupPaginationStates } from "./discord/index.ts";
 import { resolveChannelToProject, loadProjectContext, buildContextEmbed } from "./project/index.ts";
+import { handleChatMessage } from "./chat/index.ts";
 import { runVersionCheck, startPeriodicUpdateCheck, BOT_VERSION } from "./util/version-check.ts";
 
 // Core modules - now handle most of the heavy lifting
@@ -251,6 +252,16 @@ export async function createClaudeCodeBot(config: BotConfig) {
         console.log(`[channel-router] Switched to project: ${resolved} (channel: #${channelName})`);
         workDir = resolved;
       }
+    },
+    onMessage: async (channelId: string, channelName: string, content: string, sendReply: (text: string) => Promise<void>) => {
+      await handleChatMessage(channelId, channelName, content, sendReply, {
+        resolveProject: (name) => resolveChannelToProject(name, workDir),
+        getQueryOptions: () => allHandlers.getQueryOptions(),
+        sendClaudeMessages,
+        getClaudeController: () => claudeController,
+        setClaudeController: (controller) => { claudeController = controller; },
+        setClaudeSessionId: (sessionId) => { claudeSessionId = sessionId; },
+      });
     },
     onChannelActivated: async (channelName: string, channelId: string) => {
       // Send context greeting embed on first interaction per channel per session

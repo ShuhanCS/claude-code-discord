@@ -29,6 +29,7 @@ import { screenshotCommands, createScreenshotHandlers } from "../screenshot/inde
 import { infoCommands, createInfoCommandHandlers } from "../claude/index.ts";
 import { projectCommands, syncCommand, createProjectHandler } from "../project/index.ts";
 import { taskCommand, createTaskHandlers } from "../task/index.ts";
+import { chatCommands, createChatHandlers } from "../chat/index.ts";
 import { cleanSessionId, ClaudeSessionManager } from "../claude/index.ts";
 import type { ClaudeModelOptions } from "../claude/index.ts";
 import type { AskUserCallback } from "../claude/index.ts";
@@ -141,6 +142,9 @@ export interface AllHandlers {
   infoCommands: ReturnType<typeof createInfoCommandHandlers>;
   project: ReturnType<typeof createProjectHandler>;
   task: ReturnType<typeof createTaskHandlers>;
+  chat: ReturnType<typeof createChatHandlers>;
+  /** Build ClaudeModelOptions from current unified settings — used by chat handler */
+  getQueryOptions: () => ClaudeModelOptions;
 }
 
 /**
@@ -632,6 +636,8 @@ export function createAllHandlers(
 
   const taskHandlers = createTaskHandlers();
 
+  const chatHandlers = createChatHandlers();
+
   return {
     claude: claudeHandlers,
     enhancedClaude: enhancedClaudeHandlers,
@@ -648,6 +654,8 @@ export function createAllHandlers(
     infoCommands: infoCommandHandlers,
     project: projectHandler,
     task: taskHandlers,
+    chat: chatHandlers,
+    getQueryOptions,
   };
 }
 
@@ -674,6 +682,7 @@ export function getAllCommands() {
     syncCommand,
     helpCommand,
     taskCommand,
+    ...chatCommands,
   ];
 }
 

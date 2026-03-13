@@ -684,6 +684,7 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
   const shellHandlers = createShellCommandHandlers(gitShellDeps);
   const utilityHandlers = createUtilityCommandHandlers(gitShellDeps);
   const taskHandlers = createTaskCommandHandlers(handlers, crashHandler);
+  const chatHandlers = createChatCommandHandlers(handlers);
 
   // Combine all handlers into single map
   const commandHandlers: CommandHandlers = new Map([
@@ -698,7 +699,36 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
     ...utilityHandlers,
     ...projectHandlers,
     ...taskHandlers,
+    ...chatHandlers,
   ]);
 
   return commandHandlers;
+}
+
+// ================================
+// Chat Command Handlers
+// ================================
+
+/**
+ * Create /new and /sessions command handlers.
+ */
+function createChatCommandHandlers(
+  handlers: AllHandlers,
+): Map<string, { execute: (ctx: InteractionContext) => Promise<void> }> {
+  const { chat: chatHandlers } = handlers;
+
+  return new Map([
+    ['new', {
+      execute: async (ctx: InteractionContext) => {
+        const channelId = ctx.getChannelId();
+        const channelName = ctx.getChannelName() || 'unknown';
+        await chatHandlers.onNew(ctx, channelId, channelName);
+      }
+    }],
+    ['sessions', {
+      execute: async (ctx: InteractionContext) => {
+        await chatHandlers.onSessions(ctx);
+      }
+    }],
+  ]);
 }
